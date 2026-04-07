@@ -281,95 +281,103 @@ impl eframe::App for WaifuApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let current_agent_state = *self.state.lock().unwrap();
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        // 1. TOP PANEL: Title and Waifu Selector
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(10.0);
                 ui.heading("Waifu Display");
-                
+                ui.add_space(5.0);
+            });
+            
+            ui.horizontal(|ui| {
                 ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    ui.label("Waifu:");
-                    egui::ComboBox::from_id_source("waifu_selector")
-                        .selected_text(&self.current_set.name)
-                        .show_ui(ui, |ui| {
-                            for set in &self.waifu_sets {
-                                let label = if set.is_directory {
-                                    format!("{} ({} frames)", set.name, set.frame_count)
-                                } else {
-                                    set.name.clone()
+                ui.label("Waifu:");
+                egui::ComboBox::from_id_source("waifu_selector")
+                    .selected_text(&self.current_set.name)
+                    .show_ui(ui, |ui| {
+                        for set in &self.waifu_sets {
+                            let label = if set.is_directory {
+                                format!("{} ({} frames)", set.name, set.frame_count)
+                            } else {
+                                set.name.clone()
+                            };
+                            
+                            if ui.selectable_value(&mut self.current_set, set.clone(), &label).clicked() {
+                                let config = AppConfig {
+                                    selected_waifu: set.name.clone(),
                                 };
-                                
-                                // FIX: Removed .clone() from self.current_set so the dropdown actually works!
-                                if ui.selectable_value(&mut self.current_set, set.clone(), &label).clicked() {
-                                    let config = AppConfig {
-                                        selected_waifu: set.name.clone(),
-                                    };
-                                    save_config(&config);
+                                save_config(&config);
+                            }
+                        }
+                    });
+            });
+            ui.add_space(10.0);
+        });
+
+        // 2. BOTTOM PANEL: State Label and Debug controls
+        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+            ui.add_space(10.0);
+            ui.vertical_centered(|ui| {
+                ui.label(format!("State: {:?} ({}/{})", current_agent_state, current_agent_state.to_index() + 1, self.current_set.frame_count));
+            });
+
+            if self.show_debug {
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.label("State:");
+                    egui::ComboBox::from_id_source("state_selector")
+                        .selected_text(format!("{:?}", current_agent_state))
+                        .show_ui(ui, |ui| {
+                            for s in AgentState::all() {
+                                let mut temp_state = current_agent_state;
+                                if ui.selectable_value(&mut temp_state, s, format!("{:?}", s)).clicked() {
+                                    let mut state_lock = self.state.lock().unwrap();
+                                    *state_lock = s;
                                 }
                             }
                         });
                 });
-                
-                ui.add_space(10.0);
-                
-                // Anti-crash safeguard: Ensure dimensions don't go negative or to zero during window resize
-                let avail = ui.available_width().max(10.0);
-                let image_size = egui::vec2(avail * 0.8, avail * 0.8);
-                let uv = current_agent_state.to_uv_rect(self.current_set.frame_count);
+            }
+            ui.add_space(10.0);
+        });
 
-                let image = if self.current_set.is_directory {
-                    let frame_index = current_agent_state.to_index() + 1;
-                    let frame_path = self.current_set.path.join(format!("{}.png", frame_index));
-                    
-                    if frame_path.exists() {
-                        // FIX: Added 'file://' so egui correctly loads the image instead of giving a Red Triangle
-                        let frame_str = format!("file://{}", frame_path.display()); 
-                        Some(egui::Image::new(frame_str).fit_to_exact_size(image_size))
-                    } else {
-                        let fallback_path = PathBuf::from("assets").join(&self.current_set.name).join("1.png");
-                        if fallback_path.exists() {
-                            let fallback_str = format!("file://{}", fallback_path.display());
-                            Some(egui::Image::new(fallback_str).fit_to_exact_size(image_size))
-                        } else {
-                            None
-                        }
-                    }
+        // 3. CENTRAL PANEL: Image space
+        // CentralPanel automatically fills whatever space is left between the Top and Bottom panels.
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let uv = current_agent_state.to_uv_rect(self.current_set.frame_count);
+
+            let image = if self.current_set.is_directory {
+                let frame_index = current_agent_state.to_index() + 1;
+                let frame_path = self.current_set.path.join(format!("{}.png", frame_index));
+                
+                if frame_path.exists() {
+                    let frame_str = format!("file://{}", frame_path.display()); 
+                    Some(egui::Image::new(frame_str))
                 } else {
-                    // FIX: Process single-image waifus and added 'file://'
-                    let file_str = format!("file://{}", self.current_set.path.display());
-                    Some(egui::Image::new(file_str)
-                        .uv(uv)
-                        .fit_to_exact_size(image_size))
-                };
-
-                let image = image.unwrap_or_else(|| {
-                    egui::Image::new(egui::include_image!("../assets/waifu.png"))
-                        .uv(uv)
-                        .fit_to_exact_size(image_size)
-                });
-
-                ui.add(image);
-                
-                ui.add_space(10.0);
-                ui.label(format!("State: {:?} ({}/{})", current_agent_state, current_agent_state.to_index() + 1, self.current_set.frame_count));
-
-                if self.show_debug {
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label("State:");
-                        egui::ComboBox::from_id_source("state_selector")
-                            .selected_text(format!("{:?}", current_agent_state))
-                            .show_ui(ui, |ui| {
-                                for s in AgentState::all() {
-                                    let mut temp_state = current_agent_state;
-                                    if ui.selectable_value(&mut temp_state, s, format!("{:?}", s)).clicked() {
-                                        let mut state_lock = self.state.lock().unwrap();
-                                        *state_lock = s;
-                                    }
-                                }
-                            });
-                    });
+                    let fallback_path = PathBuf::from("assets").join(&self.current_set.name).join("1.png");
+                    if fallback_path.exists() {
+                        let fallback_str = format!("file://{}", fallback_path.display());
+                        Some(egui::Image::new(fallback_str))
+                    } else {
+                        None
+                    }
                 }
+            } else {
+                let file_str = format!("file://{}", self.current_set.path.display());
+                Some(egui::Image::new(file_str).uv(uv))
+            };
+
+            let image_widget = image.unwrap_or_else(|| {
+                let fallback_path = PathBuf::from("assets").join(&self.current_set.name).join("1.png");
+                let fallback_str = format!("file://{}", fallback_path.display());
+                egui::Image::new(fallback_str).uv(uv)
+            });
+
+            // This perfectly centers the image and scales it up/down to take exactly the available space
+            // without stretching the character's face/body (maintains aspect ratio).
+            ui.centered_and_justified(|ui| {
+                ui.add(image_widget.fit_to_exact_size(ui.available_size()).maintain_aspect_ratio(true));
             });
         });
     }
