@@ -33,10 +33,11 @@ Modern AI agents are incredibly smart (they can write files, execute Python, and
 
 ---
 
-## 🎨 The "One-PNG" Modding System
-You don't need to learn Live2D, rigging, or 3D mesh deformation to create a custom companion. 
+## 🎨 Character System
+`waifu-sprites` supports multiple characters via a flexible spritesheet system.
 
-The entire visual engine runs off a single image file (`assets/waifu.png`). It expects a **4x3 grid** of 12 square frames representing the Agent's current state:
+### Single PNG Mode
+The default mode uses a single PNG file with a grid of frames. It expects a **4x3 grid** of 12 square frames representing the Agent's current state:
 
 | Grid | Col 0 | Col 1 | Col 2 | Col 3 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -44,7 +45,23 @@ The entire visual engine runs off a single image file (`assets/waifu.png`). It e
 | **Row 1** | `typing` | `searching` | `calculating`| `fixing` |
 | **Row 2** | `success` | `error` | `alert` | `sleeping` |
 
-To create a new character, simply generate or draw a 4x3 expression sheet, save it as `waifu.png` in the `assets/` folder, and restart the app.
+### Directory Mode (New!)
+You can also organize characters into directories with individual frame files:
+
+```
+assets/
+├── waifu/
+│   ├── 1.png  # idle
+│   ├── 2.png  # listening
+│   ├── 3.png  # speaking
+│   └── ...
+├── alternate/
+│   ├── 1.png
+│   └── ...
+└── waifu.png  # also works as single file
+```
+
+The app automatically discovers all waifu sets from the `assets/` folder and lets you switch between them via a dropdown menu. Your selection is persisted in `waifu_config.json`.
 
 ---
 
