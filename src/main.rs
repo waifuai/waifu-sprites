@@ -1,5 +1,7 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use axum::{
@@ -44,8 +46,8 @@ impl AgentState {
         ]
     }
 
-    fn to_uv_rect(&self) -> egui::Rect {
-        let index = match self {
+    fn to_index(&self) -> usize {
+        match self {
             AgentState::Idle => 0,
             AgentState::Listening => 1,
             AgentState::Speaking => 2,
@@ -58,18 +60,122 @@ impl AgentState {
             AgentState::Error => 9,
             AgentState::Alert => 10,
             AgentState::Sleeping => 11,
-        };
+        }
+    }
 
-        let col = (index % 4) as f32;
-        let row = (index / 4) as f32;
-        let w = 1.0 / 4.0;
-        let h = 1.0 / 3.0;
+    fn to_uv_rect(&self, frame_count: u32) -> egui::Rect {
+        let index = self.to_index();
+        
+        // Anti-crash safeguard: ensure frames_per_row is never 0
+        let frames_per_row = if frame_count == 12 { 4 } else { (frame_count as f32).sqrt() as u32 }.max(1);
+        let frames_per_col = (frame_count + frames_per_row - 1) / frames_per_row;
+
+        let col = (index % frames_per_row as usize) as f32;
+        let row = (index / frames_per_row as usize) as f32;
+        let w = 1.0 / frames_per_row as f32;
+        let h = 1.0 / frames_per_col as f32;
 
         egui::Rect::from_min_max(
             egui::pos2(col * w, row * h),
             egui::pos2((col + 1.0) * w, (row + 1.0) * h),
         )
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WaifuSet {
+    pub name: String,
+    pub path: PathBuf,
+    pub is_directory: bool,
+    pub frame_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AppConfig {
+    selected_waifu: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            selected_waifu: "waifu".to_string(),
+        }
+    }
+}
+
+fn get_config_path() -> PathBuf {
+    let exe_path = std::env::current_exe().unwrap_or_default();
+    let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
+    exe_dir.join("waifu_config.json")
+}
+
+fn load_config() -> AppConfig {
+    let path = get_config_path();
+    if let Ok(contents) = fs::read_to_string(&path) {
+        if let Ok(config) = serde_json::from_str(&contents) {
+            return config;
+        }
+    }
+    AppConfig::default()
+}
+
+fn save_config(config: &AppConfig) {
+    let path = get_config_path();
+    if let Ok(json) = serde_json::to_string_pretty(config) {
+        let _ = fs::write(path, json);
+    }
+}
+
+fn discover_waifu_sets() -> Vec<WaifuSet> {
+    let mut sets = Vec::new();
+    let assets_dir = PathBuf::from("assets");
+
+    if let Ok(entries) = fs::read_dir(&assets_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            
+            if path.is_dir() {
+                let mut frame_numbers: Vec<u32> = fs::read_dir(&path)
+                    .map(|entries| {
+                        entries.flatten()
+                            .filter(|e| e.path().extension().map_or(false, |ext| ext == "png"))
+                            .filter_map(|e| {
+                                let name = e.file_name().to_string_lossy().to_string();
+                                name.trim_end_matches(".png").parse::<u32>().ok()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                
+                frame_numbers.sort();
+                let frame_count = frame_numbers.len() as u32;
+                
+                if frame_count > 0 {
+                    sets.push(WaifuSet {
+                        name,
+                        path: path.clone(),
+                        is_directory: true,
+                        frame_count,
+                    });
+                }
+            } else if path.extension().map_or(false, |ext| ext == "png") {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.len() > 1000 {
+                        sets.push(WaifuSet {
+                            name,
+                            path: path.clone(),
+                            is_directory: false,
+                            frame_count: 12,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    sets.sort_by(|a, b| a.name.cmp(&b.name));
+    sets
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,14 +188,15 @@ struct AppSharedState {
     repaint_signal: broadcast::Sender<()>,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), eframe::Error> {
-    // Setup tracing for debugging
+// FIX: Removed #[tokio::main] to prevent the Windows resize crash
+fn main() -> Result<(), eframe::Error> {
     tracing_subscriber::fmt::init();
 
-    // Shared state between Axum and egui
+    // Initialize Tokio runtime manually so it doesn't fight eframe for the main thread
+    let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
+    let _enter = rt.enter();
+
     let current_state = Arc::new(Mutex::new(AgentState::Idle));
-    // Broadcast channel to signal egui to repaint when state changes
     let (tx, _) = broadcast::channel(10);
 
     let shared = Arc::new(AppSharedState {
@@ -97,8 +204,9 @@ async fn main() -> Result<(), eframe::Error> {
         repaint_signal: tx.clone(),
     });
 
-    // Spawn Background HTTP Server
     let server_shared = shared.clone();
+    
+    // Because we 'entered' the runtime, we can safely use tokio::spawn
     tokio::spawn(async move {
         let app = Router::new()
             .route("/state", post(update_state_handler))
@@ -110,10 +218,17 @@ async fn main() -> Result<(), eframe::Error> {
         axum::serve(listener, app).await.unwrap();
     });
 
-    // Run egui
+    let config = load_config();
+    let waifu_sets = discover_waifu_sets();
+
+    let initial_waifu = config.selected_waifu.clone();
+    let initial_set = waifu_sets.iter().find(|s| s.name == initial_waifu).cloned()
+        .or_else(|| waifu_sets.first().cloned())
+        .unwrap_or_else(|| waifu_sets[0].clone());
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 500.0])
+            .with_inner_size([600.0, 550.0])
             .with_title("Waifu Display")
             .with_transparent(false),
         ..Default::default()
@@ -123,13 +238,11 @@ async fn main() -> Result<(), eframe::Error> {
         "Waifu Display",
         options,
         Box::new(move |cc| {
-            // Install image loaders for PNG support
             egui_extras::install_image_loaders(&cc.egui_ctx);
             
             let mut rx = tx.subscribe();
             let ctx = cc.egui_ctx.clone();
             
-            // Listen for repaint signals in a background thread
             tokio::spawn(async move {
                 while rx.recv().await.is_ok() {
                     ctx.request_repaint();
@@ -138,9 +251,11 @@ async fn main() -> Result<(), eframe::Error> {
 
             Box::new(WaifuApp {
                 state: current_state,
+                waifu_sets: waifu_sets.clone(),
+                current_set: initial_set,
                 show_debug: true,
             })
-        }),
+        })
     )
 }
 
@@ -157,6 +272,8 @@ async fn update_state_handler(
 
 struct WaifuApp {
     state: Arc<Mutex<AgentState>>,
+    waifu_sets: Vec<WaifuSet>,
+    current_set: WaifuSet,
     show_debug: bool,
 }
 
@@ -166,28 +283,80 @@ impl eframe::App for WaifuApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.add_space(20.0);
+                ui.add_space(10.0);
                 ui.heading("Waifu Display");
                 
-                // Display the image
-                let image_size = ui.available_size() * 0.8;
-                let uv = current_agent_state.to_uv_rect();
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.label("Waifu:");
+                    egui::ComboBox::from_id_source("waifu_selector")
+                        .selected_text(&self.current_set.name)
+                        .show_ui(ui, |ui| {
+                            for set in &self.waifu_sets {
+                                let label = if set.is_directory {
+                                    format!("{} ({} frames)", set.name, set.frame_count)
+                                } else {
+                                    set.name.clone()
+                                };
+                                
+                                // FIX: Removed .clone() from self.current_set so the dropdown actually works!
+                                if ui.selectable_value(&mut self.current_set, set.clone(), &label).clicked() {
+                                    let config = AppConfig {
+                                        selected_waifu: set.name.clone(),
+                                    };
+                                    save_config(&config);
+                                }
+                            }
+                        });
+                });
+                
+                ui.add_space(10.0);
+                
+                // Anti-crash safeguard: Ensure dimensions don't go negative or to zero during window resize
+                let avail = ui.available_width().max(10.0);
+                let image_size = egui::vec2(avail * 0.8, avail * 0.8);
+                let uv = current_agent_state.to_uv_rect(self.current_set.frame_count);
 
-                // Load the texture from assets/waifu.png
-                let image = egui::Image::new(egui::include_image!("../assets/waifu.png"))
-                    .uv(uv)
-                    .fit_to_exact_size(image_size);
+                let image = if self.current_set.is_directory {
+                    let frame_index = current_agent_state.to_index() + 1;
+                    let frame_path = self.current_set.path.join(format!("{}.png", frame_index));
+                    
+                    if frame_path.exists() {
+                        // FIX: Added 'file://' so egui correctly loads the image instead of giving a Red Triangle
+                        let frame_str = format!("file://{}", frame_path.display()); 
+                        Some(egui::Image::new(frame_str).fit_to_exact_size(image_size))
+                    } else {
+                        let fallback_path = PathBuf::from("assets").join(&self.current_set.name).join("1.png");
+                        if fallback_path.exists() {
+                            let fallback_str = format!("file://{}", fallback_path.display());
+                            Some(egui::Image::new(fallback_str).fit_to_exact_size(image_size))
+                        } else {
+                            None
+                        }
+                    }
+                } else {
+                    // FIX: Process single-image waifus and added 'file://'
+                    let file_str = format!("file://{}", self.current_set.path.display());
+                    Some(egui::Image::new(file_str)
+                        .uv(uv)
+                        .fit_to_exact_size(image_size))
+                };
+
+                let image = image.unwrap_or_else(|| {
+                    egui::Image::new(egui::include_image!("../assets/waifu.png"))
+                        .uv(uv)
+                        .fit_to_exact_size(image_size)
+                });
 
                 ui.add(image);
                 
                 ui.add_space(10.0);
-                ui.label(format!("Current State: {:?}", current_agent_state));
+                ui.label(format!("State: {:?} ({}/{})", current_agent_state, current_agent_state.to_index() + 1, self.current_set.frame_count));
 
-                // Debug UI
                 if self.show_debug {
                     ui.separator();
                     ui.horizontal(|ui| {
-                        ui.label("Manual Test:");
+                        ui.label("State:");
                         egui::ComboBox::from_id_source("state_selector")
                             .selected_text(format!("{:?}", current_agent_state))
                             .show_ui(ui, |ui| {
