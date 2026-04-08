@@ -145,6 +145,8 @@ let currentState = '';
 let currentSet = '';
 let sets = [];
 let usingVideo = false;
+let manualMode = false;
+let manualTimer = null;
 
 const displayArea = document.getElementById('displayArea');
 const stateText = document.getElementById('stateText');
@@ -186,10 +188,21 @@ function updateControls() {
   });
 }
 
-function setState(state) {
+function setState(state, fromServer = false) {
+  if (!fromServer) {
+    // Manual click: enter manual mode, auto-resume after 5s of no server updates
+    manualMode = true;
+    clearTimeout(manualTimer);
+    manualTimer = setTimeout(() => { manualMode = false; }, 5000);
+  } else {
+    // Server update: always take over
+    manualMode = false;
+    clearTimeout(manualTimer);
+  }
+
   if (state === currentState && currentSet) return;
   currentState = state;
-  stateText.textContent = state;
+  stateText.textContent = state + (manualMode ? ' [manual]' : '');
   updateControls();
   fetchAsset();
 }
@@ -282,10 +295,8 @@ async function poll() {
     }
 
     if (data.state !== currentState) {
-      currentState = data.state;
-      stateText.textContent = currentState;
-      updateControls();
-      fetchAsset();
+      // Server state change: always overrides manual mode
+      setState(data.state, true);
     }
 
     debugBar.textContent = `polling OK | ${sets.length} sets | ${usingVideo ? 'video' : 'image'} | ${new Date().toLocaleTimeString()}`;
