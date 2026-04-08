@@ -182,12 +182,11 @@ function setState(state) {
   fetchAsset();
 }
 
-function onSetChange() {
+waifuSelect.addEventListener('change', () => {
   currentSet = waifuSelect.value;
+  localStorage.setItem('waifu_set', currentSet);
   fetchAsset();
-}
-
-waifuSelect.addEventListener('change', onSetChange);
+});
 
 async function fetchAsset() {
   if (!currentSet) return;
@@ -252,7 +251,8 @@ async function poll() {
         waifuSelect.appendChild(opt);
       });
       if (!currentSet && sets.length > 0) {
-        currentSet = sets[0].name;
+        const saved = localStorage.getItem('waifu_set');
+        currentSet = (saved && sets.find(s => s.name === saved)) ? saved : sets[0].name;
         waifuSelect.value = currentSet;
       }
     }
