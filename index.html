@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waifu Display</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #eee;
+    font-family: 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .header {
+    text-align: center;
+    padding: 12px;
+    background: #16213e;
+    border-bottom: 2px solid #e94560;
+  }
+  .header h1 { font-size: 1.3em; color: #e94560; }
+  .state-label {
+    font-size: 0.9em;
+    color: #aaa;
+    margin-top: 4px;
+  }
+  .state-label span { color: #e94560; font-weight: bold; }
+
+  .waifu-selector {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .waifu-selector label { font-size: 0.85em; color: #aaa; }
+  .waifu-selector select {
+    background: #1a1a2e;
+    color: #eee;
+    border: 1px solid #e94560;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.85em;
+  }
+
+  .display-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    position: relative;
+    overflow: hidden;
+  }
+
+  video, .sprite-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .sprite-img {
+    image-rendering: pixelated;
+  }
+
+  .no-asset {
+    color: #666;
+    font-size: 1.2em;
+    text-align: center;
+    padding: 2em;
+  }
+
+  .controls {
+    padding: 10px;
+    background: #16213e;
+    border-top: 2px solid #e94560;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+  }
+
+  .controls button {
+    padding: 6px 14px;
+    border: 1px solid #e94560;
+    background: transparent;
+    color: #eee;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+    transition: all 0.15s;
+  }
+  .controls button:hover { background: #e94560; }
+  .controls button.active {
+    background: #e94560;
+    color: #fff;
+    font-weight: bold;
+  }
+
+  .debug-bar {
+    padding: 6px 12px;
+    background: #0f0f23;
+    font-size: 0.75em;
+    color: #555;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Waifu Display</h1>
+  <div class="state-label">State: <span id="stateText">idle</span></div>
+  <div class="waifu-selector">
+    <label>Waifu:</label>
+    <select id="waifuSelect"><option>loading...</option></select>
+  </div>
+</div>
+
+<div class="display-area" id="displayArea">
+  <div class="no-asset" id="placeholder">Loading...</div>
+</div>
+
+<div class="controls" id="controls"></div>
+<div class="debug-bar" id="debugBar">polling...</div>
+
+<script>
+const STATES = [
+  'idle', 'listening', 'speaking', 'thinking',
+  'typing', 'searching', 'calculating', 'fixing',
+  'success', 'error', 'alert', 'sleeping'
+];
+
+let currentState = '';
+let currentSet = '';
+let sets = [];
+let usingVideo = false;
+
+const displayArea = document.getElementById('displayArea');
+const stateText = document.getElementById('stateText');
+const controlsDiv = document.getElementById('controls');
+const debugBar = document.getElementById('debugBar');
+const waifuSelect = document.getElementById('waifuSelect');
+
+let videoEl = document.createElement('video');
+videoEl.autoplay = true;
+videoEl.loop = true;
+videoEl.muted = true;
+videoEl.playsInline = true;
+videoEl.style.display = 'none';
+displayArea.appendChild(videoEl);
+
+let imgEl = document.createElement('img');
+imgEl.className = 'sprite-img';
+imgEl.style.display = 'none';
+displayArea.appendChild(imgEl);
+
+// Build control buttons
+STATES.forEach(s => {
+  const btn = document.createElement('button');
+  btn.textContent = s;
+  btn.dataset.state = s;
+  btn.addEventListener('click', () => setState(s));
+  controlsDiv.appendChild(btn);
+});
+
+function updateControls() {
+  controlsDiv.querySelectorAll('button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.state === currentState);
+  });
+}
+
+function setState(state) {
+  if (state === currentState && currentSet) return;
+  currentState = state;
+  stateText.textContent = state;
+  updateControls();
+  fetchAsset();
+}
+
+function onSetChange() {
+  currentSet = waifuSelect.value;
+  fetchAsset();
+}
+
+waifuSelect.addEventListener('change', onSetChange);
+
+async function fetchAsset() {
+  if (!currentSet) return;
+
+  try {
+    // Fetch asset URL from server
+    const res = await fetch(`/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}`);
+    if (!res.ok) {
+      showPlaceholder(`No asset for "${currentState}"`);
+      return;
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    const assetUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}&t=${Date.now()}`;
+
+    if (contentType.includes('video')) {
+      // MP4 mode
+      videoEl.style.display = 'block';
+      imgEl.style.display = 'none';
+      document.getElementById('placeholder').style.display = 'none';
+      videoEl.pause();
+      videoEl.src = assetUrl;
+      videoEl.load();
+      videoEl.play().catch(() => {});
+      usingVideo = true;
+    } else {
+      // PNG mode
+      videoEl.style.display = 'none';
+      videoEl.pause();
+      imgEl.style.display = 'block';
+      document.getElementById('placeholder').style.display = 'none';
+      imgEl.src = assetUrl;
+      usingVideo = false;
+    }
+  } catch (e) {
+    showPlaceholder(`Error: ${e.message}`);
+  }
+}
+
+function showPlaceholder(msg) {
+  videoEl.style.display = 'none';
+  imgEl.style.display = 'none';
+  const ph = document.getElementById('placeholder');
+  ph.style.display = 'block';
+  ph.textContent = msg;
+}
+
+// Poll server for state + set changes
+async function poll() {
+  try {
+    const res = await fetch('/current_state');
+    const data = await res.json();
+
+    // Update sets list
+    if (data.sets && JSON.stringify(data.sets) !== JSON.stringify(sets)) {
+      sets = data.sets;
+      waifuSelect.innerHTML = '';
+      sets.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.name;
+        opt.textContent = `${s.name} (${s.type})`;
+        waifuSelect.appendChild(opt);
+      });
+      if (!currentSet && sets.length > 0) {
+        currentSet = sets[0].name;
+        waifuSelect.value = currentSet;
+      }
+    }
+
+    if (data.state !== currentState) {
+      currentState = data.state;
+      stateText.textContent = currentState;
+      updateControls();
+      fetchAsset();
+    }
+
+    debugBar.textContent = `polling OK | ${sets.length} sets | ${usingVideo ? 'video' : 'image'} | ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    debugBar.textContent = `poll error: ${e.message}`;
+  }
+}
+
+setInterval(poll, 100);
+poll();
+</script>
+</body>
+</html>

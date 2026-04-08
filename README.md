@@ -1,12 +1,10 @@
 # 🐾 waifu-sprites
 
-**A blazing-fast, 15MB pure-Rust display server for local AI Agents.**
+**A lightweight web-based display server for local AI Agents.**
 
-`waifu-sprites` is a lightweight, zero-latency desktop companion UI designed to act as the "**Face**" for headless, agentic LLM orchestrators (like `hermes-agent`). 
+`waifu-sprites` is a browser-based companion UI that acts as the "Face" for headless, agentic LLM orchestrators (like `hermes-agent`).
 
-It completely abandons the bloated Electron/React ecosystem and complex 3D Live2D rigging in favor of native Rust (**egui**) and a single 4x3 PNG spritesheet.
-
-![Waifu Sprites Preview](assets/waifu.png)
+Uses a simple Node.js server + HTML/CSS/JS frontend. The browser handles all rendering, image display, and MP4 video decoding natively.
 
 ---
 
@@ -16,72 +14,91 @@ Modern AI agents are incredibly smart (they can write files, execute Python, and
 - **Bloated** 500MB+ Web UI wrappers that drain your laptop's battery.
 - **Complex** 3D VTuber setups that are fragile and resource-heavy.
 
-`waifu-sprites` fixes this by decoupling the **Brain** (your Python/WSL2 Agent) from the **Face** (this Rust binary). 
+`waifu-sprites` fixes this by decoupling the **Brain** (your Python/WSL2 Agent) from the **Face** (this web server).
 
-* **CPU/RAM Usage:** ~15MB (Idles at 0% CPU).
+* **CPU/RAM Usage:** Minimal (browser does the work).
 * **Launch Time:** Instant.
-* **Moddability:** You can reskin the entire UI in 30 seconds using Midjourney or MS Paint.
+* **Moddability:** Edit HTML/CSS/JS, refresh browser, done.
+* **MP4 Support:** Native — just drop `.mp4` files in `videos/`.
 
 ---
 
 ## 🏗️ Architecture
-`waifu-sprites` acts as a "dumb" visual terminal. It contains zero AI logic. 
+`waifu-sprites` acts as a "dumb" visual terminal. It contains zero AI logic.
 
-1. It runs a local async HTTP server using **Axum** on `localhost:8000/state`.
+1. It runs a local HTTP server using **Node.js** on `localhost:8000`.
 2. Your AI backend (running in WSL2, Docker, or Python) sends a tiny JSON payload: `{"state": "typing"}`.
-3. The Rust **egui** frontend instantly calculates the UV coordinates of a single 4x3 PNG image and draws the corresponding frame.
+3. The browser frontend polls for state changes and displays the matching asset (PNG or MP4).
 
 ---
 
 ## 🎨 Character System
-`waifu-sprites` supports multiple characters via a flexible spritesheet system.
+`waifu-sprites` supports multiple characters via the `assets/` folder.
 
-### Single PNG Mode
-The default mode uses a single PNG file with a grid of frames. It expects a **4x3 grid** of 12 square frames representing the Agent's current state:
-
-| Grid | Col 0 | Col 1 | Col 2 | Col 3 |
-| :--- | :--- | :--- | :--- | :--- |
-| **Row 0** | `idle` | `listening` | `speaking` | `thinking` |
-| **Row 1** | `typing` | `searching` | `calculating`| `fixing` |
-| **Row 2** | `success` | `error` | `alert` | `sleeping` |
-
-### Directory Mode (New!)
-You can also organize characters into directories with individual frame files:
+### Directory Mode
+Individual PNG frames per state:
 
 ```
 assets/
 ├── waifu/
-│   ├── 1.png  # idle
-│   ├── 2.png  # listening
-│   ├── 3.png  # speaking
+│   ├── 1.png   # idle
+│   ├── 2.png   # listening
+│   ├── 3.png   # speaking
+│   ├── ...
+│   ├── e1.png  # emotion: idle
 │   └── ...
-├── alternate/
-│   ├── 1.png
-│   └── ...
-└── waifu.png  # also works as single file
+├── ori.png     # spritesheet (4x3 grid)
+└── hologram-simple.png  # spritesheet
 ```
 
-The app automatically discovers all waifu sets from the `assets/` folder and lets you switch between them via a dropdown menu. Your selection is persisted in `waifu_config.json`.
+### MP4 Mode (New!)
+Drop MP4 files in `videos/` for animated sprites — takes priority over PNGs when present:
+
+```
+videos/
+├── idle.mp4
+├── speaking.mp4
+├── thinking.mp4
+└── ...
+```
+
+Or use numbered files: `1.mp4`, `2.mp4`, etc. (1=idle, 2=listening, ...)
+
+Browsers decode H.264 MP4 natively with hardware acceleration. Much smaller than GIFs.
+
+---
+
+## 🎭 States
+12 agent states, mapped to frame numbers:
+
+| # | State | # | State |
+|---|-------|---|-------|
+| 1 | idle | 7 | calculating |
+| 2 | listening | 8 | fixing |
+| 3 | speaking | 9 | success |
+| 4 | thinking | 10 | error |
+| 5 | typing | 11 | alert |
+| 6 | searching | 12 | sleeping |
 
 ---
 
 ## 🚀 Getting Started
 
-### 1. Build & Run the Frontend
-Requires the [Rust toolchain](https://rustup.rs/).
+### Prerequisites
+- [Node.js](https://nodejs.org/) (any recent version)
+
+### Run
 
 ```bash
-# Clone and enter the repository
-git clone https://github.com/your-repo/waifu-sprites
 cd waifu-sprites
-
-# Build and run in release mode
-cargo run --release
+node server.js
+# Open http://localhost:8000
 ```
-The window will appear showing the `idle` state.
 
-### 2. Connect Your Backend (Python/Node/Bash)
-You can test the UI instantly by sending a POST request to the local server.
+Or double-click `waifu-demo.bat` on Windows.
+
+### Connect Your Backend (Python/Node/Bash)
+Same API as before — drop-in compatible.
 
 **From any terminal:**
 ```bash
@@ -100,13 +117,22 @@ def update_waifu(state):
 update_waifu("typing")
 ```
 
-The UI will instantly snap to the corresponding frame of the PNG grid.
+### API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/state` | POST | Set current state `{"state": "speaking"}` |
+| `/current_state` | GET | Get current state + available sets |
+| `/asset?set=waifu&state=idle` | GET | Serve asset for state |
+| `/sets` | GET | List discovered waifu sets |
+| `/assets/*` | GET | Direct asset file access |
+| `/videos/*` | GET | Direct video file access |
 
 ---
 
 ## 🛠️ Stack
-- **Language:** Rust 🦀
-- **GUI Framework:** [egui](https://github.com/emilk/egui) / [eframe](https://github.com/emilk/egui/tree/master/crates/eframe)
-- **Async Runtime:** [tokio](https://tokio.rs/)
-- **HTTP Server:** [axum](https://github.com/tokio-rs/axum)
-- **Serialization:** [serde](https://serde.rs/)
+- **Runtime:** [Node.js](https://nodejs.org/) (zero npm dependencies)
+- **Server:** Built-in `http` module
+- **Frontend:** Vanilla HTML/CSS/JS
+- **Video:** Browser-native `<video>` element (H.264/VP8)
+- **Images:** Browser-native `<img>` element (PNG/JPG/SVG)
