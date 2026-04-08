@@ -33,7 +33,7 @@ Modern AI agents are incredibly smart (they can write files, execute Python, and
 ---
 
 ## 🎨 Character System
-`waifu-sprites` supports multiple characters via the `assets/` folder.
+`waifu-sprites` supports multiple characters via the `assets/` folder. Auto-discovers all sets on startup.
 
 ### Directory Mode
 Individual PNG frames per state:
@@ -47,11 +47,18 @@ assets/
 │   ├── ...
 │   ├── e1.png  # emotion: idle
 │   └── ...
-├── ori.png     # spritesheet (4x3 grid)
-└── hologram-simple.png  # spritesheet
 ```
 
-### MP4 Mode (New!)
+### Spritesheet Mode
+Single PNG with a 4x3 grid of frames. Automatically cropped via CSS `background-position` to show the correct frame per state.
+
+```
+assets/
+├── ori.png              # spritesheet (4x3 grid)
+└── hologram-simple.png  # spritesheet (4x3 grid)
+```
+
+### MP4 Mode
 Drop MP4 files in `videos/` for animated sprites — takes priority over PNGs when present:
 
 ```
@@ -65,6 +72,14 @@ videos/
 Or use numbered files: `1.mp4`, `2.mp4`, etc. (1=idle, 2=listening, ...)
 
 Browsers decode H.264 MP4 natively with hardware acceleration. Much smaller than GIFs.
+
+### Waifu Selector
+Dropdown in the UI to switch between sets. Selection is saved to `localStorage` and persists across reloads.
+
+---
+
+## 🎮 Manual Browse Mode
+Click the ⏸ button to pause auto-follow and browse states manually with the buttons. Click ▶ to resume following the server. State label shows `[manual]` when in browse mode.
 
 ---
 
@@ -95,7 +110,7 @@ node server.js
 # Open http://localhost:8000
 ```
 
-Or double-click `waifu-demo.bat` on Windows.
+Or double-click `waifu-sprites.bat` on Windows.
 
 ### Connect Your Backend (Python/Node/Bash)
 Same API as before — drop-in compatible.
@@ -136,3 +151,4 @@ update_waifu("typing")
 - **Frontend:** Vanilla HTML/CSS/JS
 - **Video:** Browser-native `<video>` element (H.264/VP8)
 - **Images:** Browser-native `<img>` element (PNG/JPG/SVG)
+- **Spritesheets:** CSS `background-position` cropping (4x3 grid)
