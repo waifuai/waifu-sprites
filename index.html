@@ -67,6 +67,12 @@
     image-rendering: pixelated;
   }
 
+  .sprite-sheet {
+    image-rendering: pixelated;
+    background-repeat: no-repeat;
+    background-size: 400% 300%;
+  }
+
   .no-asset {
     color: #666;
     font-size: 1.2em;
@@ -159,6 +165,12 @@ imgEl.className = 'sprite-img';
 imgEl.style.display = 'none';
 displayArea.appendChild(imgEl);
 
+// Spritesheet container - uses CSS sprites to show one frame from a grid
+let sheetEl = document.createElement('div');
+sheetEl.className = 'sprite-sheet';
+sheetEl.style.display = 'none';
+displayArea.appendChild(sheetEl);
+
 // Build control buttons
 STATES.forEach(s => {
   const btn = document.createElement('button');
@@ -188,50 +200,62 @@ waifuSelect.addEventListener('change', () => {
   fetchAsset();
 });
 
+function showDisplay(mode) {
+  videoEl.style.display = mode === 'video' ? 'block' : 'none';
+  imgEl.style.display = mode === 'image' ? 'block' : 'none';
+  sheetEl.style.display = mode === 'sheet' ? 'block' : 'none';
+  document.getElementById('placeholder').style.display = mode === 'none' ? 'block' : 'none';
+  if (mode !== 'video') videoEl.pause();
+}
+
+function stateToGridPos(state) {
+  const idx = STATES.indexOf(state);
+  return { col: idx % 4, row: Math.floor(idx / 4) };
+}
+
 async function fetchAsset() {
   if (!currentSet) return;
 
   try {
-    // Fetch asset URL from server
-    const res = await fetch(`/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}`);
-    if (!res.ok) {
-      showPlaceholder(`No asset for "${currentState}"`);
-      return;
-    }
+    const res = await fetch(`/current_state`);
+    const data = await res.json();
+    const setInfo = sets.find(s => s.name === currentSet);
+    const isSpritesheet = setInfo && setInfo.type === 'spritesheet';
 
-    const contentType = res.headers.get('content-type') || '';
-    const assetUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}&t=${Date.now()}`;
-
-    if (contentType.includes('video')) {
-      // MP4 mode
-      videoEl.style.display = 'block';
-      imgEl.style.display = 'none';
-      document.getElementById('placeholder').style.display = 'none';
+    // Check for MP4 first
+    if (data.videoAsset) {
+      showDisplay('video');
+      const videoUrl = `${data.videoAsset}&t=${Date.now()}`;
       videoEl.pause();
-      videoEl.src = assetUrl;
+      videoEl.src = videoUrl;
       videoEl.load();
       videoEl.play().catch(() => {});
       usingVideo = true;
+      return;
+    }
+
+    if (isSpritesheet) {
+      // Spritesheet mode: load image, crop with CSS background-position
+      const imgUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}&t=${Date.now()}`;
+      const { col, row } = stateToGridPos(currentState);
+
+      showDisplay('sheet');
+      sheetEl.style.width = '100%';
+      sheetEl.style.height = '100%';
+      sheetEl.style.backgroundImage = `url(${imgUrl})`;
+      sheetEl.style.backgroundPosition = `${(col / 3) * 100}% ${(row / 2) * 100}%`;
+      usingVideo = false;
     } else {
-      // PNG mode
-      videoEl.style.display = 'none';
-      videoEl.pause();
-      imgEl.style.display = 'block';
-      document.getElementById('placeholder').style.display = 'none';
-      imgEl.src = assetUrl;
+      // Directory mode: single PNG per state
+      const imgUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}&t=${Date.now()}`;
+      showDisplay('image');
+      imgEl.src = imgUrl;
       usingVideo = false;
     }
   } catch (e) {
-    showPlaceholder(`Error: ${e.message}`);
+    showDisplay('none');
+    document.getElementById('placeholder').textContent = `Error: ${e.message}`;
   }
-}
-
-function showPlaceholder(msg) {
-  videoEl.style.display = 'none';
-  imgEl.style.display = 'none';
-  const ph = document.getElementById('placeholder');
-  ph.style.display = 'block';
-  ph.textContent = msg;
 }
 
 // Poll server for state + set changes
