@@ -4,6 +4,7 @@ import re
 import requests
 import time
 import random
+import json
 
 # --- TTS Chunking Config ---
 CHUNK_LIMIT = 300  # Max chars per TTS chunk (kept for future HTTP support)
@@ -64,14 +65,63 @@ def _pick_alternative(state):
     return alts[0]  # fallback
 
 
+# --- Sprite Usage Tracking ---
+# Tracks total duration and call count per state.
+# Duration is measured from when a state starts until the next state change.
+
+_sprite_stats = {}       # {state: {"calls": int, "total_ms": float}}
+_active_state = None     # Currently displayed state
+_active_start = None     # time.monotonic() when it started
+STATS_FILE = os.path.join(os.path.dirname(__file__), "sprite_stats.json")
+
+
+def _record_duration():
+    """Record elapsed time for the currently active state."""
+    global _active_state, _active_start
+    if _active_state is not None and _active_start is not None:
+        elapsed_ms = (time.monotonic() - _active_start) * 1000
+        if _active_state not in _sprite_stats:
+            _sprite_stats[_active_state] = {"calls": 0, "total_ms": 0}
+        _sprite_stats[_active_state]["calls"] += 1
+        _sprite_stats[_active_state]["total_ms"] += elapsed_ms
+        _save_stats()
+
+
+def _save_stats():
+    """Persist tracking data to JSON file."""
+    try:
+        with open(STATS_FILE, "w") as f:
+            json.dump(_sprite_stats, f, indent=2)
+    except Exception:
+        pass
+
+
+def get_sprite_stats() -> dict:
+    """Get current tracking data."""
+    return dict(_sprite_stats)
+
+
+def _track_emotion(emotion: str):
+    """Track an emotion state sent directly (bypassing set_waifu_state)."""
+    global _active_state, _active_start
+    _record_duration()
+    _active_state = emotion
+    _active_start = time.monotonic()
+
+
 def set_waifu_state(state: str):
     """Set the agent's visual state in the Waifu Sprites UI."""
-    global _recent_states
+    global _recent_states, _active_state, _active_start
     try:
         # Anti-repetition for action states (not emotions)
         if not state.startswith('e') and _would_repeat(state):
             state = _pick_alternative(state)
-        
+
+        # Track duration of previous state before switching
+        _record_duration()
+        _active_state = state
+        _active_start = time.monotonic()
+
         _remember_state(state)
         payload = {"state": state}
         # Short timeout to avoid blocking the agent if the UI is closed
@@ -251,6 +301,7 @@ def on_tool_start(tool_call_id=None, function_name=None, function_args=None):
     
     # Also send a matching emotion for visual variety
     emotion = _tool_category_emotion(function_name)
+    _track_emotion(emotion)
     try:
         requests.post(WAIFU_URL, json={"state": emotion}, timeout=0.1)
     except requests.exceptions.RequestException:
@@ -281,6 +332,7 @@ def on_tool_complete(
         emotion = random.choice(['e1', 'e8', 'e2'])  # Happy, Confident, or Amused
     
     # Send emotion too
+    _track_emotion(emotion)
     try:
         requests.post(WAIFU_URL, json={"state": emotion}, timeout=0.1)
     except requests.exceptions.RequestException:
@@ -290,6 +342,7 @@ def on_tool_complete(
 def on_tool_error(*args, **kwargs):
     """Manual trigger for tool errors."""
     set_waifu_state("error")
+    _track_emotion("e6")
     try:
         requests.post(WAIFU_URL, json={"state": "e6"}, timeout=0.1)  # Surprised!
     except requests.exceptions.RequestException:
