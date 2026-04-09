@@ -9,6 +9,33 @@ const VIDEOS_DIR = path.join(__dirname, 'videos');
 
 let currentState = 'idle';
 let currentEmotion = null; // e1-e12 when set, null when using action state
+let currentSet = '';       // which sprite set is active
+
+// --- Display Tracking ---
+// Frontend reports what it actually shows, server aggregates
+const displayStats = {};   // {label: {calls, total_ms}}
+let lastDisplayLabel = null;
+let lastDisplayStart = null;
+
+function recordDisplayDuration() {
+  if (lastDisplayLabel && lastDisplayStart) {
+    const ms = Math.round(Date.now() - lastDisplayStart);
+    if (!displayStats[lastDisplayLabel]) displayStats[lastDisplayLabel] = { calls: 0, total_ms: 0 };
+    displayStats[lastDisplayLabel].calls++;
+    displayStats[lastDisplayLabel].total_ms += ms;
+  }
+}
+
+const EMOTION_NAMES = {
+  'e1': 'happy', 'e2': 'amused', 'e3': 'empathetic', 'e4': 'curious',
+  'e5': 'confused', 'e6': 'surprised', 'e7': 'embarrassed', 'e8': 'confident',
+  'e9': 'annoyed', 'e10': 'overwhelmed', 'e11': 'determined', 'e12': 'affectionate',
+};
+
+function stateLabel(state, emotion) {
+  const display = emotion || state;
+  return EMOTION_NAMES[display] || display;
+}
 
 const STATES = [
   'idle', 'listening', 'speaking', 'thinking',
@@ -194,7 +221,8 @@ const server = http.createServer((req, res) => {
     req.on('data', c => body += c);
     req.on('end', () => {
       try {
-        const { state } = JSON.parse(body);
+        const { state, set } = JSON.parse(body);
+        if (set) currentSet = set;
         if (EMOTIONS.includes(state)) {
           // Emotion state (e1-e12) - takes priority over action state
           currentEmotion = state;
@@ -205,6 +233,11 @@ const server = http.createServer((req, res) => {
           currentEmotion = null;
           console.log(`State -> ${state}`);
         }
+        // Track what will actually be displayed
+        const label = stateLabel(currentState, currentEmotion);
+        recordDisplayDuration();
+        lastDisplayLabel = label;
+        lastDisplayStart = Date.now();
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('OK');
       } catch {
@@ -230,6 +263,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       state: currentState,
       emotion: currentEmotion,
+      set: currentSet,
       sets: waifuSets.map(s => ({ name: s.name, type: s.type })),
       currentAsset: asset ? `/asset?set=${encodeURIComponent(set.name)}&state=${currentState}` : null,
       emotionAsset: emotionAsset ? `/asset?set=${encodeURIComponent(set.name)}&state=${emotionFrame}` : null,
@@ -351,6 +385,42 @@ const server = http.createServer((req, res) => {
       type: s.type,
       path: s.path,
     }))));
+    return;
+  }
+
+  // GET /display_stats - what the UI actually displayed
+  if (url.pathname === '/display_stats') {
+    // Flush current duration before returning
+    recordDisplayDuration();
+    if (lastDisplayLabel) lastDisplayStart = Date.now();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      stats: displayStats,
+      set: currentSet,
+    }));
+    return;
+  }
+
+  // POST /display_track - frontend reports actual display state
+  if (url.pathname === '/display_track' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { display, set } = JSON.parse(body);
+        if (set) currentSet = set;
+        if (display && display !== lastDisplayLabel) {
+          recordDisplayDuration();
+          lastDisplayLabel = display;
+          lastDisplayStart = Date.now();
+        }
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+      } catch {
+        res.writeHead(400);
+        res.end('Bad JSON');
+      }
+    });
     return;
   }
 

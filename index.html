@@ -473,6 +473,15 @@ async function poll() {
         currentEmotion = data.emotion || '';
         setState(data.state, forceUpdate);
       }
+      // Report actual displayed state to server for tracking
+      const displayLabel = currentEmotion
+        ? (EMOTION_NAMES[currentEmotion] || currentEmotion)
+        : currentState;
+      fetch('/display_track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display: displayLabel, set: currentSet }),
+      }).catch(() => {});
     }
 
     debugBar.textContent = `polling OK | ${sets.length} sets | ${usingVideo ? 'video' : 'image'} | ${new Date().toLocaleTimeString()}`;

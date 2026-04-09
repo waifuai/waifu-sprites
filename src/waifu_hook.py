@@ -108,8 +108,17 @@ def _save_stats():
 
 
 def get_sprite_stats() -> dict:
-    """Get current tracking data."""
+    """Get current tracking data (hook-side: requested states)."""
     return dict(_sprite_stats)
+
+
+def get_display_stats() -> dict:
+    """Get display tracking data from the UI server (what was actually shown)."""
+    try:
+        r = requests.get(f"{WAIFU_URL}/display_stats", timeout=0.5)
+        return r.json()
+    except Exception:
+        return {"stats": {}, "set": ""}
 
 
 def _track_emotion(emotion: str):
