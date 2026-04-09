@@ -250,9 +250,9 @@ const STATES = [
 ];
 
 const EMOTION_NAMES = {
-  'e1': 'happy', 'e2': 'amused', 'e3': 'empathetic', 'e4': 'curious',
-  'e5': 'confused', 'e6': 'surprised', 'e7': 'embarrassed', 'e8': 'confident',
-  'e9': 'annoyed', 'e10': 'overwhelmed', 'e11': 'determined', 'e12': 'affectionate'
+  'e1': '♡ happy', 'e2': '✿ amused', 'e3': 'ʚ empathetic', 'e4': '? curious',
+  'e5': '~ confused', 'e6': '! surprised', 'e7': '/// embarrassed', 'e8': '★ confident',
+  'e9': '> annoyed', 'e10': '* overwhelmed', 'e11': '⚡ determined', 'e12': '♥ affectionate'
 };
 
 let currentState = '';
@@ -302,7 +302,7 @@ STATES.forEach(s => {
 // Build emotion buttons
 Object.keys(EMOTION_NAMES).forEach(e => {
   const btn = document.createElement('button');
-  btn.textContent = `${e} ${EMOTION_NAMES[e]}`;
+  btn.textContent = EMOTION_NAMES[e];
   btn.dataset.emotion = e;
   btn.style.borderColor = '#ff69b4';
   btn.addEventListener('click', () => setEmotion(e));
@@ -384,7 +384,7 @@ function updateEmotionLabel() {
   const el = document.getElementById('emotionText');
   if (currentEmotion) {
     const name = EMOTION_NAMES[currentEmotion] || currentEmotion;
-    el.textContent = ` | ${name} (${currentEmotion})`;
+    el.textContent = ` | ${name}`;
   } else {
     el.textContent = '';
   }
