@@ -2,3 +2,4 @@
 node_modules/
 videos/
 __pycache__/
+sprite_stats.json

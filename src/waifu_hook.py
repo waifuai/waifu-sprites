@@ -72,7 +72,7 @@ def _pick_alternative(state):
 _sprite_stats = {}       # {state: {"calls": int, "total_ms": float}}
 _active_state = None     # Currently displayed state
 _active_start = None     # time.monotonic() when it started
-STATS_FILE = os.path.join(os.path.dirname(__file__), "sprite_stats.json")
+STATS_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "sprite_stats.json")
 
 
 def _record_duration():
