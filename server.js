@@ -6,6 +6,7 @@ const PORT = 8000;
 const TTS_PORT = 8001;
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
+const DISPLAY_STATS_FILE = path.join(__dirname, 'display_stats.json');
 
 let currentState = 'idle';
 let currentEmotion = null; // e1-e12 when set, null when using action state
@@ -13,9 +14,19 @@ let currentSet = '';       // which sprite set is active
 
 // --- Display Tracking ---
 // Frontend reports what it actually shows, server aggregates
-const displayStats = {};   // {label: {calls, total_ms}}
+let displayStats = {};
+try {
+  if (fs.existsSync(DISPLAY_STATS_FILE)) {
+    displayStats = JSON.parse(fs.readFileSync(DISPLAY_STATS_FILE, 'utf8'));
+    console.log(`Loaded display stats: ${Object.keys(displayStats).length} states`);
+  }
+} catch { displayStats = {}; }
 let lastDisplayLabel = null;
 let lastDisplayStart = null;
+
+function saveDisplayStats() {
+  try { fs.writeFileSync(DISPLAY_STATS_FILE, JSON.stringify(displayStats, null, 2)); } catch {}
+}
 
 function recordDisplayDuration() {
   if (lastDisplayLabel && lastDisplayStart) {
@@ -23,6 +34,7 @@ function recordDisplayDuration() {
     if (!displayStats[lastDisplayLabel]) displayStats[lastDisplayLabel] = { calls: 0, total_ms: 0 };
     displayStats[lastDisplayLabel].calls++;
     displayStats[lastDisplayLabel].total_ms += ms;
+    saveDisplayStats();
   }
 }
 
