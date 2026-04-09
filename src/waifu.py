@@ -1,137 +1,122 @@
 #!/usr/bin/env python3
 """
-waifu.py — Reference integration example for waifu-sprites
-===========================================================
-This is a REFERENCE IMPLEMENTATION showing how to hook waifu-sprites
-into a CLI-based AI agent using Python monkey-patching.
-
-This specific version targets hermes-agent (https://github.com/nousresearch/hermes-agent).
-Adapt the class names and method signatures for your own agent framework.
-
-The pattern:
-  1. Import your agent's CLI module
-  2. Save original methods
-  3. Wrap them with waifu_hook calls
-  4. Monkey-patch the class
-  5. Delegate to original CLI main()
+Waifu AI Integration Wrapper for Hermes Agent
+=============================================
+This script acts as a non-destructive wrapper for the Hermes CLI.
+It patches the original modules at runtime to inject Waifu AI visual/voice hooks.
 
 Usage:
-    cd ~/.hermes/hermes-agent
-    python /path/to/waifu.py
-
-Or create a launcher script:
-    cd ~/.hermes/hermes-agent && venv/bin/python3 /path/to/waifu.py
+    python waifu.py [args]
 """
 
 import sys
 import os
 import threading
 
-# Add the directory containing waifu_hook.py to the path.
-# If waifu_hook.py is in the same directory as this file:
-HOOK_DIR = os.path.abspath(os.path.dirname(__file__))
-if HOOK_DIR not in sys.path:
-    sys.path.insert(0, HOOK_DIR)
+# --- 1. Environment Setup ---
+# Ensure we can import modules from the hermes-agent directory
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-# If your agent's modules are in a different directory, add that too:
-# AGENT_DIR = os.path.expanduser("~/.hermes/hermes-agent")
-# if AGENT_DIR not in sys.path:
-#     sys.path.insert(0, AGENT_DIR)
-
-import waifu_hook
-
-
-# =============================================================================
-# STEP 1: Import your agent's CLI module
-# =============================================================================
-# Replace this with whatever your agent framework uses.
-# For hermes-agent, it's `cli` (the module containing HermesCLI class).
-
+# --- 2. Import Hermes CLI and Waifu Hooks ---
 try:
-    import cli  # hermes-agent specific
+    import cli
+    import waifu_hook
 except ImportError as e:
-    print(f"[waifu] Error: Could not import agent CLI module: {e}")
-    print("[waifu] Make sure you're running from the agent's directory.")
+    print(f"[!] Error: Could not import required modules: {e}")
     sys.exit(1)
 
+# --- 3. Define Patched Methods ---
 
-# =============================================================================
-# STEP 2: Save original methods
-# =============================================================================
-# We'll wrap these to inject waifu hooks without modifying source code.
-
+# Save original methods for delegation
 original_init_agent = cli.HermesCLI._init_agent
 original_chat = cli.HermesCLI.chat
 
 
-# =============================================================================
-# STEP 3: Define patched methods
-# =============================================================================
+def patched_init_agent(
+    self, model_override=None, runtime_override=None, route_label=None
+):
+    """
+    Interpose agent initialization to inject lifecycle callbacks.
+    """
+    # 1. Call the original initialization (creates self.agent)
+    result = original_init_agent(
+        self,
+        model_override=model_override,
+        runtime_override=runtime_override,
+        route_label=route_label,
+    )
 
-def patched_init_agent(self, model_override=None, runtime_override=None, route_label=None):
-    """Wrap agent initialization to inject tool lifecycle callbacks."""
-    result = original_init_agent(self, model_override=model_override,
-                                  runtime_override=runtime_override,
-                                  route_label=route_label)
-
+    # 2. If agent was initialized, wrap its callbacks
     if self.agent is not None:
-        # Wrap tool callbacks
+        # Wrap tool_start_callback
         orig_start = self.agent.tool_start_callback
-        orig_complete = self.agent.tool_complete_callback
 
         def wrapped_tool_start(tool_call_id, function_name, function_args):
             waifu_hook.on_tool_start(tool_call_id, function_name, function_args)
             if orig_start:
                 orig_start(tool_call_id, function_name, function_args)
 
-        def wrapped_tool_complete(tool_call_id, function_name, function_args, function_result):
-            waifu_hook.on_tool_complete(tool_call_id, function_name, function_args, function_result)
+        # Wrap tool_complete_callback
+        orig_complete = self.agent.tool_complete_callback
+
+        def wrapped_tool_complete(
+            tool_call_id, function_name, function_args, function_result
+        ):
+            waifu_hook.on_tool_complete(
+                tool_call_id, function_name, function_args, function_result
+            )
             if orig_complete:
-                orig_complete(tool_call_id, function_name, function_args, function_result)
+                orig_complete(
+                    tool_call_id, function_name, function_args, function_result
+                )
 
         self.agent.tool_start_callback = wrapped_tool_start
         self.agent.tool_complete_callback = wrapped_tool_complete
+
+        # thinking_callback is usually None in CLI, so we can just set it
         self.agent.thinking_callback = waifu_hook.on_user_input_received
 
     return result
 
 
 def patched_chat(self, message, images=None):
-    """Wrap the main chat loop for high-level visual states + TTS."""
-    # User sent message
+    """
+    Interpose the main chat loop to trigger high-level states.
+    """
+    # 1. User sent message -> Thinking
     waifu_hook.on_user_input_received()
+
+    # 2. Indicate transition to speaking/generating
     waifu_hook.on_agent_speaking()
 
-    # Run original chat
+    # 3. Call original chat logic
     response = original_chat(self, message, images)
 
-    # Update emotion based on response
+    # 4. Detect emotion from response and set sprite
     if response:
         emotion = waifu_hook.detect_emotion(response)
         waifu_hook.set_waifu_state(emotion)
-        # TTS in background thread
+    else:
+        waifu_hook.on_agent_idle()
+
+    # 5. TTS in background thread
+    if response:
         threading.Thread(
             target=waifu_hook.on_agent_reply, args=(response,), daemon=True
         ).start()
-    else:
-        waifu_hook.on_agent_idle()
 
     return response
 
 
-# =============================================================================
-# STEP 4: Apply monkey patches
-# =============================================================================
-
+# --- 4. Apply Monkey Patches ---
 cli.HermesCLI._init_agent = patched_init_agent
 cli.HermesCLI.chat = patched_chat
 
 
-# =============================================================================
-# STEP 5: Launch
-# =============================================================================
-
+# --- 5. Execution ---
 if __name__ == "__main__":
-    # Delegates to the original CLI entry point.
-    # For hermes-agent, cli.main() uses fire.Fire(HermesCLI).
+    # Delegates to the original cli.main()
+    # cli.main uses fire.Fire(HermesCLI)
     cli.main()

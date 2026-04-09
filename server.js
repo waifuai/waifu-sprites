@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 8000;
+const TTS_PORT = 8001;
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
 
@@ -283,6 +284,63 @@ const server = http.createServer((req, res) => {
       return res.end('Not found');
     }
     return serveFile(req, res, filePath);
+  }
+
+  // ── TTS Proxy Helper ──────────────────────────────────────────────────────
+  function proxyTTS(targetPath, method, body) {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: '127.0.0.1',
+        port: TTS_PORT,
+        path: targetPath,
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+      const req = http.request(options, (tres) => {
+        let data = '';
+        tres.on('data', c => data += c);
+        tres.on('end', () => {
+          try { resolve(JSON.parse(data)); }
+          catch { resolve({ raw: data, status: tres.statusCode }); }
+        });
+      });
+      req.on('error', () => resolve({ error: 'TTS server unavailable' }));
+      if (body) req.write(JSON.stringify(body));
+      req.end();
+    });
+  }
+
+  // GET /tts/status — TTS queue state for the UI
+  if (url.pathname === '/tts/status' && req.method === 'GET') {
+    proxyTTS('/tts/status', 'GET').then(data => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    });
+    return;
+  }
+
+  // POST /tts/skip — skip forward or backward
+  if (url.pathname === '/tts/skip' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      let parsed = {};
+      try { parsed = JSON.parse(body); } catch {}
+      proxyTTS('/tts/skip', 'POST', parsed).then(data => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      });
+    });
+    return;
+  }
+
+  // POST /tts/clear — clear TTS queue
+  if (url.pathname === '/tts/clear' && req.method === 'POST') {
+    proxyTTS('/clear', 'POST').then(data => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    });
+    return;
   }
 
   // GET /sets - list available waifu sets

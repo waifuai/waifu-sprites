@@ -1,55 +1,18 @@
-"""
-waifu_hook.py — Agent integration hooks for waifu-sprites
-=========================================================
-Drop this into any Python AI agent project to get visual state updates
-and optional TTS voice output via the waifu-sprites display server.
-
-The display server (server.js) must be running on localhost:8000.
-For WSL2/Docker, the host IP is auto-detected.
-
-States sent via POST /state:
-  Action states: idle, listening, speaking, thinking, typing,
-                 searching, calculating, fixing, success, error, alert, sleeping
-  Emotion states: e1 through e12 (see EMOTION_MAP below)
-
-Usage:
-    import waifu_hook
-
-    # Visual states
-    waifu_hook.set_waifu_state("thinking")
-    waifu_hook.on_user_input_received()
-    waifu_hook.on_tool_start("web_search")
-    waifu_hook.on_tool_complete()
-    waifu_hook.on_agent_speaking()
-
-    # Emotion detection from response text
-    emotion = waifu_hook.detect_emotion("Great question! Let me look that up...")
-    waifu_hook.set_waifu_state(emotion)  # -> "e8" (Confident)
-
-    # TTS (optional)
-    waifu_hook.on_agent_reply("Here is the answer you were looking for.")
-"""
-
 import subprocess
 import os
 import re
+import requests
 import time
 
-try:
-    import requests
-except ImportError:
-    requests = None
-    print("[waifu_hook] Warning: 'requests' not installed. pip install requests")
+# --- TTS Chunking Config ---
+CHUNK_LIMIT = 300  # Max chars per TTS chunk (kept for future HTTP support)
 
-
-# =============================================================================
-# Configuration
-# =============================================================================
 
 def get_windows_host_ip():
-    """Auto-detect Windows host IP from WSL2. Returns 127.0.0.1 otherwise."""
+    """Get the Windows host IP address from WSL2."""
     if "WSL_DISTRO_NAME" in os.environ:
         try:
+            # Get default gateway from ip route (the Windows Host VM switch)
             result = subprocess.run(["ip", "route"], capture_output=True, text=True)
             for line in result.stdout.splitlines():
                 if line.startswith("default via"):
@@ -59,57 +22,34 @@ def get_windows_host_ip():
     return "127.0.0.1"
 
 
-# Server URLs — change these if your server runs elsewhere
+# --- Configuration ---
 WAIFU_URL = f"http://{get_windows_host_ip()}:8000/state"
-TTS_URL = f"http://{get_windows_host_ip()}:8001/tts"
+VOICE_URL = f"http://{get_windows_host_ip()}:8001/tts"
 
-# TTS queue file (file-based fallback when HTTP TTS isn't available)
-# Set to None to disable file queue
-QUEUE_FILE = os.path.expanduser("~/.waifu-voice-queue.txt")
-
-# Max chars per TTS chunk
-TTS_CHUNK_LIMIT = 300
-
-
-# =============================================================================
-# Core: Set Visual State
-# =============================================================================
 
 def set_waifu_state(state: str):
-    """Send a state to the waifu-sprites display server.
-
-    Args:
-        state: One of the 12 action states or emotion codes (e1-e12).
-               See README.md for the full list.
-    """
-    if requests is None:
-        return
+    """Set the agent's visual state in the Waifu Sprites UI."""
     try:
-        requests.post(WAIFU_URL, json={"state": state}, timeout=0.1)
+        payload = {"state": state}
+        # Short timeout to avoid blocking the agent if the UI is closed
+        requests.post(WAIFU_URL, json=payload, timeout=0.1)
     except requests.exceptions.RequestException:
-        pass  # Silently fail if server isn't running
+        pass
 
 
-# =============================================================================
-# Lifecycle Hooks
-# =============================================================================
-# Call these at the right moment in your agent's execution loop.
+# --- Visual State Hooks ---
+
 
 def on_user_input_received(*args, **kwargs):
-    """Call when the user sends a message."""
+    """Triggered when the user enters a prompt."""
     set_waifu_state("thinking")
 
 
 def on_tool_start(tool_call_id=None, function_name=None, function_args=None):
-    """Call when your agent starts executing a tool.
-
-    Automatically picks a visual state based on the tool name:
-      - math/calculate -> "calculating"
-      - search/browser -> "searching"
-      - everything else -> "typing"
-    """
+    """Triggered when a tool starts execution."""
     if not function_name:
         return
+
     if "math" in function_name or "calculate" in function_name:
         set_waifu_state("calculating")
     elif "search" in function_name or "browser" in function_name:
@@ -118,114 +58,88 @@ def on_tool_start(tool_call_id=None, function_name=None, function_args=None):
         set_waifu_state("typing")
 
 
-def on_tool_complete(tool_call_id=None, function_name=None,
-                     function_args=None, function_result=None):
-    """Call when a tool finishes successfully."""
+def on_tool_complete(
+    tool_call_id=None, function_name=None, function_args=None, function_result=None
+):
+    """Triggered when a tool completes successfully."""
     set_waifu_state("success")
-    time.sleep(0.5)  # Brief pause so the success sprite is visible
+    # Brief pause so the success sprite is visible
+    time.sleep(0.5)
 
 
 def on_tool_error(*args, **kwargs):
-    """Call when a tool fails."""
+    """Manual trigger for tool errors."""
     set_waifu_state("error")
     time.sleep(1.5)
 
 
-def on_agent_speaking(*args, **kwargs):
-    """Call when the agent starts generating a response."""
-    set_waifu_state("speaking")
+# --- Aliases for backward compatibility with older manual patches ---
 
 
-def on_agent_idle(*args, **kwargs):
-    """Call when the agent is done and waiting for input."""
-    set_waifu_state("idle")
+def on_tool_success(*args, **kwargs):
+    """Alias for on_tool_complete."""
+    return on_tool_complete(*args, **kwargs)
 
 
-# Aliases for convenience
-on_tool_success = on_tool_complete
-on_tool_failure = on_tool_error
+def on_tool_failure(*args, **kwargs):
+    """Alias for on_tool_error."""
+    return on_tool_error(*args, **kwargs)
 
 
-# =============================================================================
-# Emotion Detection
-# =============================================================================
-# Maps response text to emotion sprites (e1-e12).
-# Customize EMOTION_KEYWORDS to match your agent's personality.
+# --- Emotion Detection from Text ---
 
-EMOTION_MAP = {
-    "e1":  "Happy",
-    "e2":  "Amused",
-    "e3":  "Empathetic",
-    "e4":  "Curious",
-    "e5":  "Confused",
-    "e6":  "Surprised",
-    "e7":  "Embarrassed",
-    "e8":  "Confident",
-    "e9":  "Annoyed",
-    "e10": "Overwhelmed",
-    "e11": "Determined",
-    "e12": "Affectionate",
-}
 
-# Keyword → emotion mapping. First match wins, so order matters.
-# Customize these keywords to fit your agent's personality.
+# Keyword → emotion mapping. Order matters (first match wins).
+# Emotions: e1-e12 matching 12-emotion-prompts.txt
+#   e1=Happy  e2=Amused  e3=Empathetic  e4=Curious
+#   e5=Confused  e6=Surprised  e7=Embarrassed  e8=Confident
+#   e9=Annoyed  e10=Overwhelmed  e11=Determined  e12=Affectionate
 EMOTION_KEYWORDS = [
-    # e12 - Affectionate
-    (["love", "thank you", "you're sweet", "you're the best",
-      "heart", "glad i could help", "happy to help", "you're welcome"],
-     "e12"),
+    # e12 - Affectionate (check first, compliments are specific)
+    (["love", "thank you", "you're sweet", "you're the best", "cutie",
+      "heart", "glad i could help", "happy to help", "you're welcome",
+      "♡", "❤"], "e12"),
     # e7 - Embarrassed / Apologetic
     (["sorry", "apolog", "unfortunately", "my bad", "my mistake",
-      "oops", "i was wrong", "couldn't find", "i can't", "i don't have"],
-     "e7"),
+      "oops", "i was wrong", "i made an error", "couldn't find",
+      "i can't", "i'm afraid", "i don't have"], "e7"),
     # e10 - Overwhelmed
     (["this is a lot", "so many", "overwhelm", "massive", "huge amount",
-      "complex", "complicated"],
-     "e10"),
+      "complex", "complicated"], "e10"),
     # e6 - Surprised
     (["wow", "whoa", "oh!", "amazing!", "incredible!", "no way",
-      "fascinating", "that's wild", "didn't expect"],
-     "e6"),
+      "fascinating", "that's wild", "didn't expect"], "e6"),
     # e5 - Confused
     (["hmm", "confus", "unclear", "ambiguous", "what do you mean",
-      "not sure what", "i'm not sure", "wait"],
-     "e5"),
+      "not sure what", "i'm not sure", "wait", "actually..."], "e5"),
     # e9 - Annoyed
     (["again", "repeatedly", "as i said", "i already", "once more",
-      "please don't", "that's not"],
-     "e9"),
+      "please don't", "that's not"], "e9"),
     # e4 - Curious
     (["?", "what is", "how does", "tell me more", "interesting",
-      "i wonder", "curious", "what if", "could you"],
-     "e4"),
+      "i wonder", "curious", "what if", "could you"], "e4"),
     # e8 - Confident
     (["found it", "here's", "let me show", "perfect", "exactly",
-      "done!", "easy", "no problem", "absolutely", "definitely"],
-     "e8"),
+      "nailed", "done!", "easy", "no problem", "absolutely",
+      "definitely", "certainly"], "e8"),
     # e11 - Determined
     (["let me", "i'll", "going to", "here's how", "step by step",
-      "first,", "here's what we'll do", "working on"],
-     "e11"),
+      "first,", "here's what we'll do", "working on"], "e11"),
     # e2 - Amused
-    (["haha", "lol", "lmao", "funny", "joke", "silly", "that's great"],
-     "e2"),
-    # e3 - Empathetic
+    (["haha", "lol", "lmao", "funny", "joke", "silly",
+      "that's great", "nyaa", "nya~"], "e2"),
+    # e3 - Empathetic (sad/comforting)
     (["i understand", "that's tough", "i'm sorry to hear", "it's okay",
-      "don't worry", "take your time", "hang in there"],
-     "e3"),
-    # e1 - Happy (default for positive)
+      "don't worry", "take your time", "hang in there"], "e3"),
+    # e1 - Happy (default for positive responses)
     (["great", "good", "nice", "awesome", "wonderful", "yes!",
-      "sounds good", "let's go", "exciting"],
-     "e1"),
+      "sounds good", "let's go", "exciting"], "e1"),
 ]
 
 
 def detect_emotion(text: str) -> str:
-    """Detect emotion from agent response text using keyword matching.
-
-    Returns an emotion state name (e1-e12) for use with set_waifu_state().
-    Defaults to "e1" (Happy) if no keywords match.
-    """
+    """Detect the best emotion from response text using keyword matching.
+    Returns an emotion state name (e1-e12)."""
     if not text:
         return "e1"
     lower = text.lower()
@@ -236,52 +150,126 @@ def detect_emotion(text: str) -> str:
     return "e1"
 
 
-# =============================================================================
-# TTS (Text-to-Speech) Hook
-# =============================================================================
-# Sends cleaned response text to a TTS server or file queue.
-# Requires a separate TTS server (e.g., Kokoro) listening on port 8001.
+def on_agent_speaking(*args, **kwargs):
+    """Triggered when the agent starts responding."""
+    set_waifu_state("speaking")
+
+
+def on_agent_idle(*args, **kwargs):
+    """Triggered when the agent is waiting for input."""
+    set_waifu_state("idle")
+
+
+# --- Voice/TTS Hook ---
+
 
 def clean_text_for_tts(text: str) -> str:
-    """Strip markdown, code, emojis, and kaomoji before sending to TTS."""
-    # Remove code blocks and inline code
+    """Remove emojis, kaomoji, markdown, and formatting from text before TTS."""
+    # 1. Remove code blocks and inline code
     text = re.sub(r"```[\s\S]*?```", "", text)
     text = re.sub(r"`[^`]+`", "", text)
-    # Remove markdown links but keep text
+
+    # 2. Remove markdown links but keep text
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    # Remove markdown bold/italic/headers
+
+    # 3. Remove markdown bold/italic/headers
     text = re.sub(r"\*\*?(.+?)\*\*?", r"\1", text)
     text = re.sub(r"__(.+?)__", r"\1", text)
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-    # Remove URLs
+
+    # 4. Remove URLs
     text = re.sub(r"https?://\S+", "", text)
-    # Convert list markers to sentence breaks
+
+    # 5. Handle list markers (convert to sentence breaks)
     text = re.sub(r"^\s*[-*+]\s+", ". ", text, flags=re.MULTILINE)
-    # Remove kaomoji/emoticons in parentheses
+
+    # 6. Target common kaomoji/emoticons primarily inside parentheses
     text = re.sub(r"\([^\w\s\.,!\?]{2,}\)", "", text)
-    # Remove non-ASCII characters
+
+    # 7. Specifically remove common "cat" or "waifu" style symbols and non-ASCII
+    non_ascii_symbols = [r"ฅ", r"•", r"ﻌ", r"´", r"ω", r"`", r"・", r"^", r"~"]
+    for symbol in non_ascii_symbols:
+        text = text.replace(symbol, "")
+
+    # 8. Remove remaining non-ASCII characters
     text = re.sub(r"[^\x20-\x7E\n]", "", text)
-    # Clean up punctuation artifacts
+
+    # 9. Clean up leftover punctuation artifacts from stripped emojis
     text = re.sub(r"\([^\w\s]*\)", "", text)
     text = re.sub(r"[\^\=\~]{2,}", "", text)
-    # Normalize whitespace
-    text = re.sub(r"\s+([,.!?;:\)])", r"\1", text)
+
+    # 10. Normalize spaces before punctuation and after parens
+    text = re.sub(r"\s+([,\.!?;:\)])", r"\1", text)
     text = re.sub(r"\(\s+", "(", text)
+
+    # 11. Convert newlines to sentence breaks and collapse whitespace
     text = re.sub(r"\n+", ". ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    # Normalize repeated punctuation
+
+    # 12. Final punctuation cleanup
     text = re.sub(r"\.+", ".", text)
     text = re.sub(r"^\.+", "", text)
-    # Ensure terminal punctuation
+
+    # Ensure terminal punctuation if missing
     if text and not text.endswith((".", "!", "?")):
         text += "."
+
     return text
 
 
+def split_into_sentences(text: str) -> list:
+    """Split text into sentences by punctuation terminators.
+    Mirrors waifu-companion's splitIntoSentences() logic."""
+    matches = re.findall(r'[^.!?…]+[.!?…]?\s*|[^.!?…]+$', text)
+    return [s.strip() for s in matches if s.strip()]
+
+
+def chunk_text(text: str, limit: int = CHUNK_LIMIT) -> list:
+    """Group sentences into chunks under the character limit.
+    Mirrors waifu-companion's tts_queue_manager chunking logic."""
+    sentences = split_into_sentences(text)
+    chunks = []
+    current_chunk = ""
+
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) > limit and current_chunk:
+            chunks.append(current_chunk.strip())
+            current_chunk = sentence
+        else:
+            current_chunk += (" " if current_chunk else "") + sentence
+
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+
+    return chunks
+
+
+def _get_queue_file():
+    """Get path to the TTS queue file, accessible from both WSL2 and Windows."""
+    if "WSL_DISTRO_NAME" in os.environ:
+        # Running in WSL2 — need Windows path via /mnt/c/Users/<name>/
+        try:
+            result = subprocess.run(
+                ["cmd.exe", "/c", "echo", "%USERNAME%"],
+                capture_output=True, text=True
+            )
+            win_user = result.stdout.strip()
+            if win_user:
+                return f"/mnt/c/Users/{win_user}/.waifu-voice-queue.txt"
+        except Exception:
+            pass
+    # Running on Windows or fallback
+    return os.path.join(os.path.expanduser("~"), ".waifu-voice-queue.txt")
+
+QUEUE_FILE = _get_queue_file()
+
+# HTTP TTS doesn't work from WSL2 → Windows (networking issues).
+# Use file queue exclusively — the server polls QUEUE_FILE for changes.
+_HTTP_TTS_AVAILABLE = False
+
+
 def _write_to_queue_file(text: str):
-    """Write text to the file-based TTS queue."""
-    if not QUEUE_FILE:
-        return
+    """Write text to the queue file the server monitors."""
     try:
         with open(QUEUE_FILE, "w", encoding="utf-8") as f:
             f.write(text)
@@ -290,29 +278,22 @@ def _write_to_queue_file(text: str):
 
 
 def clear_tts_queue():
-    """Cancel any pending TTS by emptying the queue."""
+    """Clear pending TTS by emptying the queue file."""
     _write_to_queue_file("")
 
 
 def on_agent_reply(text: str):
-    """Call when the agent's full response is ready.
-
-    Cleans the text and sends it to the TTS server (or file queue).
-    Runs TTS in the background so it doesn't block the agent.
-    """
-    if not text:
-        return
-    cleaned = clean_text_for_tts(text)
-    if not cleaned:
-        return
-
-    # Try HTTP TTS first
-    if requests is not None:
-        try:
-            requests.post(TTS_URL, json={"text": cleaned}, timeout=0.5)
+    """Triggered when a full response is ready to be spoken.
+    Writes cleaned text to the queue file for the server to pick up."""
+    try:
+        if not text:
             return
-        except requests.exceptions.RequestException:
-            pass  # Fall through to file queue
-
-    # File-based queue fallback
-    _write_to_queue_file(cleaned)
+        cleaned = clean_text_for_tts(text)
+        if not cleaned:
+            return
+        # File queue: write all text at once (server polls for file changes).
+        # Chunking is kept for future HTTP support but not used with file queue
+        # since each write overwrites the file.
+        _write_to_queue_file(cleaned)
+    except Exception:
+        pass
