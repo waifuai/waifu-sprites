@@ -79,7 +79,7 @@ def _record_duration():
     """Record elapsed time for the currently active state."""
     global _active_state, _active_start
     if _active_state is not None and _active_start is not None:
-        elapsed_ms = (time.monotonic() - _active_start) * 1000
+        elapsed_ms = round((time.monotonic() - _active_start) * 1000)
         if _active_state not in _sprite_stats:
             _sprite_stats[_active_state] = {"calls": 0, "total_ms": 0}
         _sprite_stats[_active_state]["calls"] += 1
