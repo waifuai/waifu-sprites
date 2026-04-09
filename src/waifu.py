@@ -75,8 +75,8 @@ def patched_init_agent(
         self.agent.tool_start_callback = wrapped_tool_start
         self.agent.tool_complete_callback = wrapped_tool_complete
 
-        # thinking_callback is usually None in CLI, so we can just set it
-        self.agent.thinking_callback = waifu_hook.on_user_input_received
+        # thinking_callback fires during model generation
+        self.agent.thinking_callback = waifu_hook.on_model_thinking
 
     return result
 
