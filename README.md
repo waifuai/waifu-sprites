@@ -1,10 +1,10 @@
 # 🐾 waifu-sprites
 
-**A lightweight web-based display server for local AI Agents.**
+**A lightweight web-based display server + TTS for local AI Agents.**
 
 `waifu-sprites` is a browser-based companion UI that acts as the "Face" for headless, agentic LLM orchestrators (like `hermes-agent`).
 
-Uses a simple Node.js server + HTML/CSS/JS frontend. The browser handles all rendering, image display, and MP4 video decoding natively.
+**Single source of truth** — sprite server, TTS server, agent hooks, and integration code all live here. Hermes-agent symlinks to `src/` so edits take effect immediately.
 
 ---
 
@@ -24,11 +24,45 @@ Modern AI agents are incredibly smart (they can write files, execute Python, and
 ---
 
 ## 🏗️ Architecture
-`waifu-sprites` acts as a "dumb" visual terminal. It contains zero AI logic.
 
-1. It runs a local HTTP server using **Node.js** on `localhost:8000`.
-2. Your AI backend (running in WSL2, Docker, or Python) sends a tiny JSON payload: `{"state": "typing"}`.
-3. The browser frontend polls for state changes and displays the matching asset (PNG or MP4).
+```
+┌─────────────────────────────────────────────────┐
+│  waifu-sprites (Windows native)                 │
+│                                                 │
+│  server.js (:8000)        tts_server.py (:8001) │
+│  Sprite display server    Kokoro TTS server     │
+│  ├─ POST /state           ├─ POST /tts          │
+│  ├─ GET /current_state    ├─ POST /clear         │
+│  ├─ GET /tts/status ──────┤ GET /tts/status      │
+│  ├─ POST /tts/skip ───────┤ POST /tts/skip       │
+│  └─ POST /tts/clear ──────┘                      │
+│                                                 │
+│  index.html (browser)                           │
+│  ├─ Sprite display + manual browse              │
+│  └─ TTS controls (⏮ ⏹ ⏭ chunk display)         │
+└─────────────────────────────────────────────────┘
+         ▲                    ▲
+         │ HTTP :8000         │ file queue
+         │                    │
+┌────────┴────────────────────┴────────┐
+│  WSL2 / hermes-agent                 │
+│                                      │
+│  waifu_hook.py (symlink → src/)      │
+│  ├─ set_waifu_state() → :8000        │
+│  ├─ on_agent_reply() → queue file    │
+│  └─ emotion detection, TTS chunking  │
+│                                      │
+│  waifu.py (symlink → src/)           │
+│  └─ Monkey-patches HermesCLI         │
+└──────────────────────────────────────┘
+```
+
+- **server.js** (Node.js, port 8000) — serves the sprite UI and proxies TTS control requests
+- **tts_server.py** (Python/Flask, port 8001) — Kokoro TTS with chunk queuing and skip support
+- **src/waifu_hook.py** — agent-side hooks (visual states, emotion detection, TTS chunking)
+- **src/waifu.py** — monkey-patches hermes-agent CLI to inject hooks automatically
+
+WSL2 can't reach Windows localhost, so agent → TTS uses a **file queue** (`~/.waifu-voice-queue.txt`). The TTS server polls it. Skip controls work over HTTP because browser + server.js both run on Windows.
 
 ---
 
@@ -83,6 +117,18 @@ Click the ⏸ button to pause auto-follow and browse states manually with the bu
 
 ---
 
+## 🔊 TTS Controls
+When TTS is active, a control bar appears below the emotion buttons:
+
+- **⏮** Skip back — replay previous chunk
+- **⏹** Stop — clear queue and stop audio
+- **⏭** Skip forward — skip to next chunk
+- **2/5** — shows current chunk / total chunks in the batch
+
+The TTS bar auto-hides when idle. Polls status every 500ms.
+
+---
+
 ## 🎭 States
 12 agent states, mapped to frame numbers:
 
@@ -101,16 +147,35 @@ Click the ⏸ button to pause auto-follow and browse states manually with the bu
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (any recent version)
+- [Python 3](https://www.python.org/) (for TTS server)
+- `pip install flask sounddevice numpy onnxruntime kokoro-onnx` (for TTS)
 
 ### Run
 
+**Start both servers:**
 ```bash
 cd waifu-sprites
-node server.js
-# Open http://localhost:8000
+node server.js          # Sprite display on :8000
+python tts_server.py    # TTS on :8001
 ```
 
-Or double-click `waifu-sprites.bat` on Windows.
+Or double-click `voice.bat` for TTS, and run `node server.js` separately.
+
+**Open** http://localhost:8000
+
+### Hermes Agent Setup (WSL2)
+
+Symlink from hermes-agent to waifu-sprites so edits take effect immediately:
+```bash
+cd ~/.hermes/hermes-agent
+ln -sf /path/to/waifu-sprites/src/waifu_hook.py waifu_hook.py
+ln -sf /path/to/waifu-sprites/src/waifu.py waifu.py
+```
+
+Then launch with:
+```bash
+cd ~/.hermes/hermes-agent && python3 waifu.py
+```
 
 ### Connect Your Backend (Python/Node/Bash)
 
@@ -133,21 +198,6 @@ def update_waifu(state):
 update_waifu("typing")
 ```
 
-### Full Agent Integration (Python)
-
-The `src/` folder contains drop-in Python files for real agent integration:
-
-- **`src/waifu_hook.py`** — Core library. Import this to get lifecycle hooks
-  (`on_tool_start`, `on_agent_speaking`, etc.), emotion detection from response
-  text (maps to e1-e12 emotion sprites), and optional TTS voice output.
-  Works with any Python agent framework.
-
-- **`src/waifu.py`** — Reference implementation showing how to monkey-patch a
-  CLI agent (hermes-agent) to automatically trigger the hooks. Use as a template
-  for your own agent.
-
-See [`src/README.md`](src/README.md) for full usage and configuration.
-
 ### API
 
 | Endpoint | Method | Description |
@@ -158,12 +208,30 @@ See [`src/README.md`](src/README.md) for full usage and configuration.
 | `/sets` | GET | List discovered waifu sets |
 | `/assets/*` | GET | Direct asset file access |
 | `/videos/*` | GET | Direct video file access |
+| `/tts/status` | GET | TTS queue state (chunk info, playing status) |
+| `/tts/skip` | POST | Skip TTS `{"direction": "forward"}` or `{"direction": "back"}` |
+| `/tts/clear` | POST | Clear TTS queue and stop audio |
 
 ---
 
+## 📁 File Structure
+
+```
+waifu-sprites/
+├── server.js           # Sprite display server (:8000)
+├── tts_server.py       # Kokoro TTS server (:8001)
+├── index.html          # Browser UI (sprites + TTS controls)
+├── send-tts.ps1        # PowerShell TTS helper
+├── src/
+│   ├── waifu_hook.py   # Agent hooks (visual states, emotion, TTS)
+│   └── waifu.py        # Hermes CLI monkey-patch wrapper
+├── assets/             # Sprite PNGs and spritesheets
+└── videos/             # MP4 animated sprites (gitignored)
+```
+
 ## 🛠️ Stack
-- **Runtime:** [Node.js](https://nodejs.org/) (zero npm dependencies)
-- **Server:** Built-in `http` module
+- **Sprite Server:** Node.js built-in `http` module (zero npm dependencies)
+- **TTS Server:** Python + Flask + Kokoro ONNX
 - **Frontend:** Vanilla HTML/CSS/JS
 - **Video:** Browser-native `<video>` element (H.264/VP8)
 - **Images:** Browser-native `<img>` element (PNG/JPG/SVG)
