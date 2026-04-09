@@ -74,16 +74,27 @@ _active_state = None     # Currently displayed state
 _active_start = None     # time.monotonic() when it started
 STATS_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "sprite_stats.json")
 
+_STATE_NAMES = {
+    "e1": "happy", "e2": "amused", "e3": "empathetic", "e4": "curious",
+    "e5": "confused", "e6": "surprised", "e7": "embarrassed", "e8": "confident",
+    "e9": "annoyed", "e10": "overwhelmed", "e11": "determined", "e12": "affectionate",
+}
+
+def _state_label(state: str) -> str:
+    """Convert state code to human-readable label."""
+    return _STATE_NAMES.get(state, state)
+
 
 def _record_duration():
     """Record elapsed time for the currently active state."""
     global _active_state, _active_start
     if _active_state is not None and _active_start is not None:
         elapsed_ms = round((time.monotonic() - _active_start) * 1000)
-        if _active_state not in _sprite_stats:
-            _sprite_stats[_active_state] = {"calls": 0, "total_ms": 0}
-        _sprite_stats[_active_state]["calls"] += 1
-        _sprite_stats[_active_state]["total_ms"] += elapsed_ms
+        label = _state_label(_active_state)
+        if label not in _sprite_stats:
+            _sprite_stats[label] = {"calls": 0, "total_ms": 0}
+        _sprite_stats[label]["calls"] += 1
+        _sprite_stats[label]["total_ms"] += elapsed_ms
         _save_stats()
 
 
