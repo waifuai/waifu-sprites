@@ -7,12 +7,16 @@ const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
 
 let currentState = 'idle';
+let currentEmotion = null; // e1-e12 when set, null when using action state
 
 const STATES = [
   'idle', 'listening', 'speaking', 'thinking',
   'typing', 'searching', 'calculating', 'fixing',
   'success', 'error', 'alert', 'sleeping'
 ];
+
+// Emotion states map to e1-e12 frames
+const EMOTIONS = ['e1','e2','e3','e4','e5','e6','e7','e8','e9','e10','e11','e12'];
 
 // AgentState -> frame number (1-indexed, matching Rust app)
 function stateToFrame(state) {
@@ -79,15 +83,26 @@ function discoverWaifuSets() {
 }
 
 // Find asset for a given state in a given set
+// state can be an action name (e.g. 'idle') or emotion code (e.g. 'e1')
 function findAsset(set, state) {
   if (set.type === 'directory') {
+    // Direct emotion code (e1, e2, etc.) - check first
+    if (EMOTIONS.includes(state)) {
+      const emotionPath = path.join(set.path, `${state}.png`);
+      if (fs.existsSync(emotionPath)) {
+        return { path: emotionPath, type: 'png' };
+      }
+    }
+
     const frameNum = stateToFrame(state);
     // Check numbered frame (1.png, 2.png, etc.)
-    const pngPath = path.join(set.path, `${frameNum}.png`);
-    if (fs.existsSync(pngPath)) {
-      return { path: pngPath, type: 'png' };
+    if (frameNum > 0) {
+      const pngPath = path.join(set.path, `${frameNum}.png`);
+      if (fs.existsSync(pngPath)) {
+        return { path: pngPath, type: 'png' };
+      }
     }
-    // Check emotion frame (e1.png, e2.png, etc.)
+    // Check emotion frame via action name (e.g. 'speaking' -> e3)
     const emotionFrame = stateToEmotionFrame(state);
     const emotionPath = path.join(set.path, `${emotionFrame}.png`);
     if (fs.existsSync(emotionPath)) {
@@ -179,8 +194,14 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const { state } = JSON.parse(body);
-        if (STATES.includes(state)) {
+        if (EMOTIONS.includes(state)) {
+          // Emotion state (e1-e12) - takes priority over action state
+          currentEmotion = state;
+          console.log(`Emotion -> ${state}`);
+        } else if (STATES.includes(state)) {
+          // Action state - clear emotion so action sprite shows
           currentState = state;
+          currentEmotion = null;
           console.log(`State -> ${state}`);
         }
         res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -200,11 +221,17 @@ const server = http.createServer((req, res) => {
     const asset = set ? findAsset(set, currentState) : null;
     const video = findVideo(currentState);
 
+    // If emotion is set, find the emotion frame (e1-e12)
+    const emotionFrame = currentEmotion;
+    const emotionAsset = emotionFrame && set ? findAsset(set, emotionFrame) : null;
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       state: currentState,
+      emotion: currentEmotion,
       sets: waifuSets.map(s => ({ name: s.name, type: s.type })),
       currentAsset: asset ? `/asset?set=${encodeURIComponent(set.name)}&state=${currentState}` : null,
+      emotionAsset: emotionAsset ? `/asset?set=${encodeURIComponent(set.name)}&state=${emotionFrame}` : null,
       videoAsset: video ? `/videos/${path.basename(video.path)}` : null,
       preferVideo: video != null,
     }));

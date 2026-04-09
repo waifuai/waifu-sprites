@@ -120,7 +120,7 @@
 
 <div class="header">
   <h1>Waifu Display</h1>
-  <div class="state-label">State: <span id="stateText">idle</span></div>
+  <div class="state-label">State: <span id="stateText">idle</span> <span id="emotionText"></span></div>
   <div class="waifu-selector">
     <label>Waifu:</label>
     <select id="waifuSelect"><option>loading...</option></select>
@@ -135,6 +135,9 @@
   <button id="manualToggle" onclick="toggleManual()" style="padding:6px 14px;border:1px solid #e94560;background:#e94560;color:#fff;border-radius:4px;cursor:pointer;font-size:0.9em;min-width:40px">⏸</button>
   <div id="controls" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center"></div>
 </div>
+<div class="controls" style="border-top:none;padding-top:4px;">
+  <div id="emotionControls" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center"></div>
+</div>
 <div class="debug-bar" id="debugBar">polling...</div>
 
 <script>
@@ -144,16 +147,25 @@ const STATES = [
   'success', 'error', 'alert', 'sleeping'
 ];
 
+const EMOTION_NAMES = {
+  'e1': 'happy', 'e2': 'amused', 'e3': 'empathetic', 'e4': 'curious',
+  'e5': 'confused', 'e6': 'surprised', 'e7': 'embarrassed', 'e8': 'confident',
+  'e9': 'annoyed', 'e10': 'overwhelmed', 'e11': 'determined', 'e12': 'affectionate'
+};
+
 let currentState = '';
+let currentEmotion = '';
 let currentSet = '';
 let sets = [];
 let usingVideo = false;
 let manualMode = false;
 let lastServerState = '';
+let lastServerEmotion = '';
 
 const displayArea = document.getElementById('displayArea');
 const stateText = document.getElementById('stateText');
 const controlsDiv = document.getElementById('controls');
+const emotionControlsDiv = document.getElementById('emotionControls');
 const debugBar = document.getElementById('debugBar');
 const waifuSelect = document.getElementById('waifuSelect');
 
@@ -185,9 +197,30 @@ STATES.forEach(s => {
   controlsDiv.appendChild(btn);
 });
 
+// Build emotion buttons
+Object.keys(EMOTION_NAMES).forEach(e => {
+  const btn = document.createElement('button');
+  btn.textContent = `${e} ${EMOTION_NAMES[e]}`;
+  btn.dataset.emotion = e;
+  btn.style.borderColor = '#ff69b4';
+  btn.addEventListener('click', () => setEmotion(e));
+  emotionControlsDiv.appendChild(btn);
+});
+
 function updateControls() {
   controlsDiv.querySelectorAll('button').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.state === currentState);
+  });
+  emotionControlsDiv.querySelectorAll('button').forEach(btn => {
+    const isActive = btn.dataset.emotion === currentEmotion;
+    btn.classList.toggle('active', isActive);
+    if (isActive) {
+      btn.style.background = '#ff69b4';
+      btn.style.color = '#fff';
+    } else {
+      btn.style.background = 'transparent';
+      btn.style.color = '#eee';
+    }
   });
 }
 
@@ -197,14 +230,27 @@ function toggleManual() {
   btn.textContent = manualMode ? '▶' : '⏸';
   btn.style.background = manualMode ? '#333' : '#e94560';
   if (!manualMode && lastServerState) {
-    setState(lastServerState);
+    setState(lastServerState, true);
+  } else if (manualMode) {
+    fetchAsset(); // refresh to drop emotion visually if needed
   }
 }
 
-function setState(state) {
-  if (state === currentState && currentSet) return;
+function setState(state, force = false) {
+  if (!force && state === currentState && currentSet) return;
   currentState = state;
   stateText.textContent = state + (manualMode ? ' [manual]' : '');
+  updateControls();
+  fetchAsset();
+}
+
+function setEmotion(emotion) {
+  currentEmotion = emotion;
+  if (manualMode) {
+    currentState = emotion;
+  }
+  stateText.textContent = currentState + (manualMode ? ' [manual]' : '');
+  updateEmotionLabel();
   updateControls();
   fetchAsset();
 }
@@ -224,8 +270,22 @@ function showDisplay(mode) {
 }
 
 function stateToGridPos(state) {
-  const idx = STATES.indexOf(state);
+  let idx = STATES.indexOf(state);
+  if (idx === -1 && typeof state === 'string' && state.match(/^e\d+$/)) {
+    idx = parseInt(state.substring(1), 10) - 1;
+  }
+  if (idx === -1) idx = 0;
   return { col: idx % 4, row: Math.floor(idx / 4) };
+}
+
+function updateEmotionLabel() {
+  const el = document.getElementById('emotionText');
+  if (currentEmotion) {
+    const name = EMOTION_NAMES[currentEmotion] || currentEmotion;
+    el.textContent = ` | ${name} (${currentEmotion})`;
+  } else {
+    el.textContent = '';
+  }
 }
 
 async function fetchAsset() {
@@ -234,6 +294,9 @@ async function fetchAsset() {
   try {
     const res = await fetch(`/current_state`);
     const data = await res.json();
+    currentEmotion = data.emotion || '';
+    updateEmotionLabel();
+
     const setInfo = sets.find(s => s.name === currentSet);
     const isSpritesheet = setInfo && setInfo.type === 'spritesheet';
 
@@ -251,8 +314,9 @@ async function fetchAsset() {
 
     if (isSpritesheet) {
       // Spritesheet mode: load image, crop with CSS background-position
-      const imgUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}&t=${Date.now()}`;
-      const { col, row } = stateToGridPos(currentState);
+      const displayState = manualMode ? currentState : (currentEmotion || currentState);
+      const imgUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${displayState}&t=${Date.now()}`;
+      const { col, row } = stateToGridPos(displayState);
 
       showDisplay('sheet');
       sheetEl.style.width = '100%';
@@ -261,8 +325,10 @@ async function fetchAsset() {
       sheetEl.style.backgroundPosition = `${(col / 3) * 100}% ${(row / 2) * 100}%`;
       usingVideo = false;
     } else {
-      // Directory mode: single PNG per state
-      const imgUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${currentState}&t=${Date.now()}`;
+      // Directory mode: prefer emotion frame, fall back to action frame
+      // Build URL client-side so it uses the selected set, not server default
+      const displayState = manualMode ? currentState : (currentEmotion || currentState);
+      const imgUrl = `/asset?set=${encodeURIComponent(currentSet)}&state=${displayState}&t=${Date.now()}`;
       showDisplay('image');
       imgEl.src = imgUrl;
       usingVideo = false;
@@ -296,10 +362,14 @@ async function poll() {
       }
     }
 
-    if (data.state !== lastServerState) {
+    // Detect state or emotion changes
+    if (data.state !== lastServerState || data.emotion !== lastServerEmotion) {
+      const forceUpdate = (data.emotion !== lastServerEmotion);
       lastServerState = data.state;
+      lastServerEmotion = data.emotion || '';
       if (!manualMode) {
-        setState(data.state);
+        currentEmotion = data.emotion || '';
+        setState(data.state, forceUpdate);
       }
     }
 
