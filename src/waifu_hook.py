@@ -3,6 +3,7 @@ import os
 import re
 import requests
 import time
+import random
 
 # --- TTS Chunking Config ---
 CHUNK_LIMIT = 300  # Max chars per TTS chunk (kept for future HTTP support)
@@ -27,9 +28,51 @@ WAIFU_URL = f"http://{get_windows_host_ip()}:8000/state"
 VOICE_URL = f"http://{get_windows_host_ip()}:8001/tts"
 
 
+# --- Anti-Repetition ---
+_recent_states = []  # Track last N states shown
+_RECENT_WINDOW = 3   # How many to remember
+
+
+def _remember_state(state):
+    """Track recent states for anti-repetition."""
+    global _recent_states
+    _recent_states.append(state)
+    if len(_recent_states) > _RECENT_WINDOW:
+        _recent_states.pop(0)
+
+
+def _would_repeat(state):
+    """Check if this state was shown recently."""
+    return state in _recent_states
+
+
+def _pick_alternative(state):
+    """Pick a related state when we'd repeat."""
+    ALTERNATIVES = {
+        'typing': ['thinking', 'fixing', 'idle'],
+        'searching': ['thinking', 'calculating', 'idle'],
+        'calculating': ['thinking', 'fixing', 'searching'],
+        'fixing': ['typing', 'thinking', 'idle'],
+        'thinking': ['typing', 'searching', 'calculating'],
+        'idle': ['sleeping', 'thinking'],
+        'sleeping': ['idle', 'thinking'],
+    }
+    alts = ALTERNATIVES.get(state, ['thinking'])
+    for alt in alts:
+        if not _would_repeat(alt):
+            return alt
+    return alts[0]  # fallback
+
+
 def set_waifu_state(state: str):
     """Set the agent's visual state in the Waifu Sprites UI."""
+    global _recent_states
     try:
+        # Anti-repetition for action states (not emotions)
+        if not state.startswith('e') and _would_repeat(state):
+            state = _pick_alternative(state)
+        
+        _remember_state(state)
         payload = {"state": state}
         # Short timeout to avoid blocking the agent if the UI is closed
         requests.post(WAIFU_URL, json=payload, timeout=0.1)
@@ -37,11 +80,163 @@ def set_waifu_state(state: str):
         pass
 
 
+# --- Tool → State Mapping ---
+# Maps every known tool to its best-matching sprite state.
+
+TOOL_STATES = {
+    # File operations → typing (screen work)
+    'read_file': 'typing',
+    'write_file': 'typing',
+    'file_read': 'typing',
+    'file_write': 'typing',
+    'file_patch': 'typing',
+    'file_tools': 'typing',
+    'patch': 'typing',
+    'search_files': 'typing',
+
+    # Web/research → searching
+    'web_search': 'searching',
+    'web_extract': 'searching',
+    'session_search': 'searching',
+    'browser_navigate': 'searching',
+    'browser_snapshot': 'searching',
+    'browser_vision': 'searching',
+    'browser_get_images': 'searching',
+    'browser_back': 'searching',
+
+    # Browser interaction → typing
+    'browser_click': 'typing',
+    'browser_type': 'typing',
+    'browser_press': 'typing',
+    'browser_scroll': 'typing',
+
+    # Code/math → calculating
+    'execute_code': 'calculating',
+    'code_execution_tool': 'calculating',
+    'browser_console': 'calculating',
+
+    # Terminal/build → fixing
+    'terminal': 'fixing',
+    'terminal_tool': 'fixing',
+    'process': 'fixing',
+    'process_registry': 'fixing',
+
+    # Agent coordination → thinking
+    'delegate_task': 'thinking',
+    'todo': 'thinking',
+    'memory': 'thinking',
+    'cronjob': 'thinking',
+    'skills_list': 'thinking',
+    'skill_view': 'thinking',
+    'skill_manage': 'thinking',
+    'skill_commands': 'thinking',
+
+    # Clarification → alert (asking user)
+    'clarify': 'alert',
+
+    # Speech
+    'text_to_speech': 'speaking',
+    'send_message': 'speaking',
+}
+
+
+def _get_tool_state(function_name: str) -> str:
+    """Map a tool function name to the best sprite state."""
+    if not function_name:
+        return 'typing'
+    
+    # Direct lookup
+    if function_name in TOOL_STATES:
+        return TOOL_STATES[function_name]
+    
+    # Fuzzy matching by keywords in tool name
+    name_lower = function_name.lower()
+    
+    if any(k in name_lower for k in ['search', 'find', 'browse', 'navigate', 'web']):
+        return 'searching'
+    elif any(k in name_lower for k in ['file', 'read', 'write', 'patch', 'edit']):
+        return 'typing'
+    elif any(k in name_lower for k in ['code', 'exec', 'run', 'math', 'calcul']):
+        return 'calculating'
+    elif any(k in name_lower for k in ['terminal', 'shell', 'build', 'install', 'git']):
+        return 'fixing'
+    elif any(k in name_lower for k in ['delegate', 'skill', 'todo', 'memory', 'cron']):
+        return 'thinking'
+    elif any(k in name_lower for k in ['speak', 'voice', 'tts', 'say']):
+        return 'speaking'
+    else:
+        return 'typing'
+
+
+# --- Emotion Rotation ---
+# Cycle through emotions during tool sequences for visual variety.
+
+EMOTION_CYCLE = ['e4', 'e11', 'e8', 'e6', 'e1', 'e2', 'e10', 'e3', 'e5', 'e12', 'e7', 'e9']
+# All 12 emotions in rotation:
+# e4=Curious  e11=Determined  e8=Confident  e6=Surprised
+# e1=Happy    e2=Amused       e10=Overwhelmed  e3=Empathetic
+# e5=Confused  e12=Affectionate  e7=Embarrassed  e9=Annoyed
+
+_emotion_index = 0
+
+
+def _next_cycle_emotion() -> str:
+    """Get the next emotion from the rotation cycle."""
+    global _emotion_index
+    emotion = EMOTION_CYCLE[_emotion_index % len(EMOTION_CYCLE)]
+    _emotion_index += 1
+    return emotion
+
+
+def _tool_category_emotion(function_name: str) -> str:
+    """Pick an emotion that fits the tool category."""
+    if not function_name:
+        return _next_cycle_emotion()
+    
+    name_lower = function_name.lower()
+    
+    # Searching/reading → curious
+    if any(k in name_lower for k in ['search', 'find', 'browse', 'navigate', 'web', 'read']):
+        return 'e4'  # Curious
+    
+    # Code/math → determined or confident
+    elif any(k in name_lower for k in ['code', 'exec', 'calcul', 'run']):
+        return random.choice(['e11', 'e8'])  # Determined or Confident
+    
+    # Terminal/build → determined
+    elif any(k in name_lower for k in ['terminal', 'shell', 'build', 'install', 'fix', 'git']):
+        return 'e11'  # Determined
+    
+    # Errors → surprised or confused
+    elif any(k in name_lower for k in ['error', 'fail']):
+        return random.choice(['e6', 'e5'])  # Surprised or Confused
+    
+    # Success → happy or confident
+    elif any(k in name_lower for k in ['success', 'done', 'complete']):
+        return random.choice(['e1', 'e8'])  # Happy or Confident
+    
+    # Delegate/thinking → thinking
+    elif any(k in name_lower for k in ['delegate', 'skill', 'todo', 'memory']):
+        return 'e10'  # Overwhelmed (thinking hard)
+    
+    # Clarify → confused/questioning
+    elif 'clarify' in name_lower:
+        return 'e5'  # Confused
+    
+    # Default → rotate
+    return _next_cycle_emotion()
+
+
 # --- Visual State Hooks ---
 
 
 def on_user_input_received(*args, **kwargs):
-    """Triggered when the user enters a prompt."""
+    """Triggered when the user enters a prompt — agent is 'listening'."""
+    set_waifu_state("listening")
+
+
+def on_model_thinking(*args, **kwargs):
+    """Triggered when the model is generating (thinking_callback)."""
     set_waifu_state("thinking")
 
 
@@ -49,28 +244,56 @@ def on_tool_start(tool_call_id=None, function_name=None, function_args=None):
     """Triggered when a tool starts execution."""
     if not function_name:
         return
-
-    if "math" in function_name or "calculate" in function_name:
-        set_waifu_state("calculating")
-    elif "search" in function_name or "browser" in function_name:
-        set_waifu_state("searching")
-    else:
-        set_waifu_state("typing")
+    
+    # Pick the best state for this tool
+    state = _get_tool_state(function_name)
+    set_waifu_state(state)
+    
+    # Also send a matching emotion for visual variety
+    emotion = _tool_category_emotion(function_name)
+    try:
+        requests.post(WAIFU_URL, json={"state": emotion}, timeout=0.1)
+    except requests.exceptions.RequestException:
+        pass
 
 
 def on_tool_complete(
     tool_call_id=None, function_name=None, function_args=None, function_result=None
 ):
     """Triggered when a tool completes successfully."""
-    set_waifu_state("success")
-    # Brief pause so the success sprite is visible
-    time.sleep(0.5)
+    # Check result for error signals - not always "success"!
+    is_error = False
+    if function_result:
+        result_str = str(function_result).lower()
+        is_error = any(k in result_str for k in [
+            'error', 'failed', 'exception', 'traceback', 'not found',
+            'denied', 'forbidden', 'unauthorized', 'timeout'
+        ])
+    
+    if is_error:
+        set_waifu_state("error")
+        emotion = random.choice(['e5', 'e7'])  # Confused or Embarrassed
+    else:
+        # Vary the "success" state - don't always show the same one
+        success_states = ['success', 'idle', 'success']  # weighted toward success
+        state = random.choice(success_states)
+        set_waifu_state(state)
+        emotion = random.choice(['e1', 'e8', 'e2'])  # Happy, Confident, or Amused
+    
+    # Send emotion too
+    try:
+        requests.post(WAIFU_URL, json={"state": emotion}, timeout=0.1)
+    except requests.exceptions.RequestException:
+        pass
 
 
 def on_tool_error(*args, **kwargs):
     """Manual trigger for tool errors."""
     set_waifu_state("error")
-    time.sleep(1.5)
+    try:
+        requests.post(WAIFU_URL, json={"state": "e6"}, timeout=0.1)  # Surprised!
+    except requests.exceptions.RequestException:
+        pass
 
 
 # --- Aliases for backward compatibility with older manual patches ---
@@ -98,7 +321,7 @@ EMOTION_KEYWORDS = [
     # e12 - Affectionate (check first, compliments are specific)
     (["love", "thank you", "you're sweet", "you're the best", "cutie",
       "heart", "glad i could help", "happy to help", "you're welcome",
-      "♡", "❤"], "e12"),
+      "\u2661", "\u2764"], "e12"),
     # e7 - Embarrassed / Apologetic
     (["sorry", "apolog", "unfortunately", "my bad", "my mistake",
       "oops", "i was wrong", "i made an error", "couldn't find",
@@ -156,8 +379,8 @@ def on_agent_speaking(*args, **kwargs):
 
 
 def on_agent_idle(*args, **kwargs):
-    """Triggered when the agent is waiting for input."""
-    set_waifu_state("idle")
+    """Triggered when the agent is waiting for input — show sleeping."""
+    set_waifu_state("sleeping")
 
 
 # --- Voice/TTS Hook ---
@@ -187,7 +410,7 @@ def clean_text_for_tts(text: str) -> str:
     text = re.sub(r"\([^\w\s\.,!\?]{2,}\)", "", text)
 
     # 7. Specifically remove common "cat" or "waifu" style symbols and non-ASCII
-    non_ascii_symbols = [r"ฅ", r"•", r"ﻌ", r"´", r"ω", r"`", r"・", r"^", r"~"]
+    non_ascii_symbols = [r"\u0298", r"\u2022", r"\uFEA5", r"\u00B4", r"\u03C9", r"`", r"\u30FB", r"^", r"~"]
     for symbol in non_ascii_symbols:
         text = text.replace(symbol, "")
 
