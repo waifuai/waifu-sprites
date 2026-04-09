@@ -113,7 +113,8 @@ node server.js
 Or double-click `waifu-sprites.bat` on Windows.
 
 ### Connect Your Backend (Python/Node/Bash)
-Same API as before — drop-in compatible.
+
+The simplest way — just POST a JSON state to the server:
 
 **From any terminal:**
 ```bash
@@ -131,6 +132,21 @@ def update_waifu(state):
 
 update_waifu("typing")
 ```
+
+### Full Agent Integration (Python)
+
+The `src/` folder contains drop-in Python files for real agent integration:
+
+- **`src/waifu_hook.py`** — Core library. Import this to get lifecycle hooks
+  (`on_tool_start`, `on_agent_speaking`, etc.), emotion detection from response
+  text (maps to e1-e12 emotion sprites), and optional TTS voice output.
+  Works with any Python agent framework.
+
+- **`src/waifu.py`** — Reference implementation showing how to monkey-patch a
+  CLI agent (hermes-agent) to automatically trigger the hooks. Use as a template
+  for your own agent.
+
+See [`src/README.md`](src/README.md) for full usage and configuration.
 
 ### API
 
