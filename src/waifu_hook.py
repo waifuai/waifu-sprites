@@ -29,40 +29,7 @@ WAIFU_URL = f"http://{get_windows_host_ip()}:8000/state"
 VOICE_URL = f"http://{get_windows_host_ip()}:8001/tts"
 
 
-# --- Anti-Repetition ---
-_recent_states = []  # Track last N states shown
-_RECENT_WINDOW = 3   # How many to remember
 
-
-def _remember_state(state):
-    """Track recent states for anti-repetition."""
-    global _recent_states
-    _recent_states.append(state)
-    if len(_recent_states) > _RECENT_WINDOW:
-        _recent_states.pop(0)
-
-
-def _would_repeat(state):
-    """Check if this state was shown recently."""
-    return state in _recent_states
-
-
-def _pick_alternative(state):
-    """Pick a related state when we'd repeat."""
-    ALTERNATIVES = {
-        'typing': ['thinking', 'fixing', 'idle'],
-        'searching': ['thinking', 'calculating', 'idle'],
-        'calculating': ['thinking', 'fixing', 'searching'],
-        'fixing': ['typing', 'thinking', 'idle'],
-        'thinking': ['typing', 'searching', 'calculating'],
-        'idle': ['sleeping', 'thinking'],
-        'sleeping': ['idle', 'thinking'],
-    }
-    alts = ALTERNATIVES.get(state, ['thinking'])
-    for alt in alts:
-        if not _would_repeat(alt):
-            return alt
-    return alts[0]  # fallback
 
 
 # --- Sprite Usage Tracking ---
@@ -131,18 +98,13 @@ def _track_emotion(emotion: str):
 
 def set_waifu_state(state: str):
     """Set the agent's visual state in the Waifu Sprites UI."""
-    global _recent_states, _active_state, _active_start
+    global _active_state, _active_start
     try:
-        # Anti-repetition for action states (not emotions)
-        if not state.startswith('e') and _would_repeat(state):
-            state = _pick_alternative(state)
-
         # Track duration of previous state before switching
         _record_duration()
         _active_state = state
         _active_start = time.monotonic()
 
-        _remember_state(state)
         payload = {"state": state}
         # Short timeout to avoid blocking the agent if the UI is closed
         requests.post(WAIFU_URL, json=payload, timeout=0.1)
@@ -239,62 +201,7 @@ def _get_tool_state(function_name: str) -> str:
 
 
 # --- Emotion Rotation ---
-# Cycle through emotions during tool sequences for visual variety.
 
-EMOTION_CYCLE = ['e4', 'e11', 'e8', 'e6', 'e1', 'e2', 'e10', 'e3', 'e5', 'e12', 'e7', 'e9']
-# All 12 emotions in rotation:
-# e4=Curious  e11=Determined  e8=Confident  e6=Surprised
-# e1=Happy    e2=Amused       e10=Overwhelmed  e3=Empathetic
-# e5=Confused  e12=Affectionate  e7=Embarrassed  e9=Annoyed
-
-_emotion_index = 0
-
-
-def _next_cycle_emotion() -> str:
-    """Get the next emotion from the rotation cycle."""
-    global _emotion_index
-    emotion = EMOTION_CYCLE[_emotion_index % len(EMOTION_CYCLE)]
-    _emotion_index += 1
-    return emotion
-
-
-def _tool_category_emotion(function_name: str) -> str:
-    """Pick an emotion that fits the tool category."""
-    if not function_name:
-        return _next_cycle_emotion()
-    
-    name_lower = function_name.lower()
-    
-    # Searching/reading → curious
-    if any(k in name_lower for k in ['search', 'find', 'browse', 'navigate', 'web', 'read']):
-        return 'e4'  # Curious
-    
-    # Code/math → determined or confident
-    elif any(k in name_lower for k in ['code', 'exec', 'calcul', 'run']):
-        return random.choice(['e11', 'e8'])  # Determined or Confident
-    
-    # Terminal/build → determined
-    elif any(k in name_lower for k in ['terminal', 'shell', 'build', 'install', 'fix', 'git']):
-        return 'e11'  # Determined
-    
-    # Errors → surprised or confused
-    elif any(k in name_lower for k in ['error', 'fail']):
-        return random.choice(['e6', 'e5'])  # Surprised or Confused
-    
-    # Success → happy or confident
-    elif any(k in name_lower for k in ['success', 'done', 'complete']):
-        return random.choice(['e1', 'e8'])  # Happy or Confident
-    
-    # Delegate/thinking → thinking
-    elif any(k in name_lower for k in ['delegate', 'skill', 'todo', 'memory']):
-        return 'e10'  # Overwhelmed (thinking hard)
-    
-    # Clarify → confused/questioning
-    elif 'clarify' in name_lower:
-        return 'e5'  # Confused
-    
-    # Default → rotate
-    return _next_cycle_emotion()
 
 
 # --- Visual State Hooks ---
@@ -314,18 +221,10 @@ def on_tool_start(tool_call_id=None, function_name=None, function_args=None):
     """Triggered when a tool starts execution."""
     if not function_name:
         return
-    
-    # Pick the best state for this tool
+
+    # Pick the best action state for this tool (typing, searching, etc.)
     state = _get_tool_state(function_name)
     set_waifu_state(state)
-    
-    # Also send a matching emotion for visual variety
-    emotion = _tool_category_emotion(function_name)
-    _track_emotion(emotion)
-    try:
-        requests.post(WAIFU_URL, json={"state": emotion}, timeout=0.1)
-    except requests.exceptions.RequestException:
-        pass
 
 
 def on_tool_complete(
@@ -340,33 +239,16 @@ def on_tool_complete(
             'error', 'failed', 'exception', 'traceback', 'not found',
             'denied', 'forbidden', 'unauthorized', 'timeout'
         ])
-    
+
     if is_error:
         set_waifu_state("error")
-        emotion = random.choice(['e5', 'e7'])  # Confused or Embarrassed
     else:
-        # Vary the "success" state - don't always show the same one
-        success_states = ['success', 'idle', 'success']  # weighted toward success
-        state = random.choice(success_states)
-        set_waifu_state(state)
-        emotion = random.choice(['e1', 'e8', 'e2'])  # Happy, Confident, or Amused
-    
-    # Send emotion too
-    _track_emotion(emotion)
-    try:
-        requests.post(WAIFU_URL, json={"state": emotion}, timeout=0.1)
-    except requests.exceptions.RequestException:
-        pass
+        set_waifu_state("idle")
 
 
 def on_tool_error(*args, **kwargs):
     """Manual trigger for tool errors."""
     set_waifu_state("error")
-    _track_emotion("e6")
-    try:
-        requests.post(WAIFU_URL, json={"state": "e6"}, timeout=0.1)  # Surprised!
-    except requests.exceptions.RequestException:
-        pass
 
 
 # --- Aliases for backward compatibility with older manual patches ---
