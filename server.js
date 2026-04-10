@@ -238,7 +238,7 @@ const server = http.createServer((req, res) => {
         if (EMOTIONS.includes(state)) {
           // Emotion state (e1-e12) - takes priority over action state
           currentEmotion = state;
-          console.log(`Emotion -> ${state}`);
+          console.log(`Emotion -> ${EMOTION_NAMES[state] || state}`);
         } else if (STATES.includes(state)) {
           // Action state - clear emotion so action sprite shows
           currentState = state;
