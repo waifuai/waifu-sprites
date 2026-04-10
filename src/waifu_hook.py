@@ -498,10 +498,98 @@ def clear_tts_queue():
     _clean_queue_dir()
 
 
+def _is_terminal_focused():
+    """Check if the terminal window is currently in the foreground. Returns True if focused or if check fails."""
+    try:
+        if "WSL_DISTRO_NAME" not in os.environ:
+            return True
+        csharp_code = (
+            'using System; using System.Runtime.InteropServices; using System.Text;'
+            'public class Focus {'
+            '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'
+            '[DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder sb, int nMaxCount);'
+            '[DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);'
+            'public static string GetTitle() {'
+            'var h = GetForegroundWindow();'
+            'var sb = new StringBuilder(GetWindowTextLength(h) + 1);'
+            'GetWindowText(h, sb, sb.Capacity);'
+            'return sb.ToString(); }'
+            '}'
+        )
+        ps_cmd = (
+            "Add-Type -TypeDefinition '" + csharp_code + "' -Language CSharp; "
+            "$t = [Focus]::GetTitle(); "
+            "if ($t -match 'Windows Terminal|PowerShell|Command Prompt|pwsh|Waifu Hermes') { 'True' } else { 'False' }"
+        )
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=3
+        )
+        return "True" in result.stdout
+    except Exception:
+        return True  # If check fails, assume focused (no spam)
+
+
+def _flash_taskbar():
+    """Flash the terminal taskbar button when Neko-chan replies (only if unfocused)."""
+    import sys
+    if _is_terminal_focused():
+        return  # Terminal is focused, no need to flash
+    try:
+        # Triple bell — more aggressive, more likely to trigger taskbar flash
+        sys.stderr.write('\a\a\a')
+        sys.stderr.flush()
+    except Exception:
+        pass
+    # PowerShell FlashWindowEx — directly flashes Windows taskbar button from WSL
+    try:
+        if "WSL_DISTRO_NAME" in os.environ:
+            ps_cmd = (
+                'Add-Type -TypeDefinition \'' 
+                'using System; using System.Runtime.InteropServices;'
+                'namespace Native {'
+                '[StructLayout(LayoutKind.Sequential)] public struct FLASHWINFO {'
+                'public uint cbSize; public IntPtr hwnd; public uint dwFlags;'
+                'public uint uCount; public uint dwTimeout;}'
+                'public class Flash {'
+                '[DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO fwi);'
+                '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();'
+                'public static void DoFlash() {'
+                'var f = new FLASHWINFO(); f.cbSize=20; f.hwnd=GetConsoleWindow();'
+                'f.dwFlags=0x0F; f.uCount=5; f.dwTimeout=0; FlashWindowEx(ref f);}'
+                '}}\' -Language CSharp; [Native.Flash]::DoFlash()'
+            )
+            subprocess.Popen(
+                ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+    except Exception:
+        pass
+    # Windows balloon notification — visible pop-up in system tray
+    try:
+        if "WSL_DISTRO_NAME" in os.environ:
+            ps_notify = (
+                'Add-Type -AssemblyName System.Windows.Forms;'
+                '$balloon = New-Object System.Windows.Forms.NotifyIcon;'
+                '$balloon.Icon = [System.Drawing.SystemIcons]::Information;'
+                '$balloon.Visible = $true;'
+                '$balloon.ShowBalloonTip(3000, "Neko-chan", "Reply received nya~",'
+                '[System.Windows.Forms.ToolTipIcon]::Info);'
+                'Start-Sleep -Seconds 4; $balloon.Dispose()'
+            )
+            subprocess.Popen(
+                ["powershell.exe", "-NoProfile", "-Command", ps_notify],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+    except Exception:
+        pass
+
+
 def on_agent_reply(text: str):
     """Triggered when a full response is ready to be spoken.
     Chunks the text and writes individual files for the server to pick up."""
     try:
+        _flash_taskbar()
         if not text:
             return
         cleaned = clean_text_for_tts(text)
