@@ -7,7 +7,7 @@ import random
 import json
 
 # --- TTS Chunking Config ---
-CHUNK_LIMIT = 300  # Max chars per TTS chunk (kept for future HTTP support)
+CHUNK_LIMIT = 300  # Max chars per TTS chunk
 
 
 def get_windows_host_ip():
@@ -540,8 +540,8 @@ def chunk_text(text: str, limit: int = CHUNK_LIMIT) -> list:
     return chunks
 
 
-def _get_queue_file():
-    """Get path to the TTS queue file, accessible from both WSL2 and Windows."""
+def _get_queue_dir():
+    """Get path to the TTS queue directory, accessible from both WSL2 and Windows."""
     if "WSL_DISTRO_NAME" in os.environ:
         # Running in WSL2 — need Windows path via /mnt/c/Users/<name>/
         try:
@@ -551,45 +551,83 @@ def _get_queue_file():
             )
             win_user = result.stdout.strip()
             if win_user:
-                return f"/mnt/c/Users/{win_user}/.waifu-voice-queue.txt"
+                return f"/mnt/c/Users/{win_user}/.waifu-voice-queue"
         except Exception:
             pass
     # Running on Windows or fallback
-    return os.path.join(os.path.expanduser("~"), ".waifu-voice-queue.txt")
+    return os.path.join(os.path.expanduser("~"), ".waifu-voice-queue")
 
-QUEUE_FILE = _get_queue_file()
+QUEUE_DIR = _get_queue_dir()
 
 # HTTP TTS doesn't work from WSL2 → Windows (networking issues).
-# Use file queue exclusively — the server polls QUEUE_FILE for changes.
+# Use multi-file queue exclusively — the server polls for chunk manifests.
 _HTTP_TTS_AVAILABLE = False
 
+_response_counter = 0
 
-def _write_to_queue_file(text: str):
-    """Write text to the queue file the server monitors."""
+
+def _write_chunks_to_queue(chunks: list):
+    """Write chunks as individual files with a manifest for the server to pick up."""
+    global _response_counter
     try:
-        with open(QUEUE_FILE, "w", encoding="utf-8") as f:
-            f.write(text)
+        os.makedirs(QUEUE_DIR, exist_ok=True)
+
+        # Clean any previous pending response
+        _clean_queue_dir()
+
+        _response_counter += 1
+        resp_id = f"resp-{_response_counter:05d}"
+
+        # Write each chunk file
+        chunk_files = []
+        for i, chunk_text in enumerate(chunks):
+            filename = f"{resp_id}-chunk-{i+1:03d}.txt"
+            filepath = os.path.join(QUEUE_DIR, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(chunk_text)
+            chunk_files.append(filename)
+
+        # Write manifest last (server watches for this)
+        manifest_path = os.path.join(QUEUE_DIR, f"{resp_id}.manifest")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(chunk_files))
+    except Exception:
+        pass
+
+
+def _clean_queue_dir():
+    """Remove all chunk and manifest files from the queue directory."""
+    try:
+        if not os.path.isdir(QUEUE_DIR):
+            return
+        for fname in os.listdir(QUEUE_DIR):
+            fpath = os.path.join(QUEUE_DIR, fname)
+            if fname.endswith((".txt", ".manifest")):
+                try:
+                    os.unlink(fpath)
+                except Exception:
+                    pass
     except Exception:
         pass
 
 
 def clear_tts_queue():
-    """Clear pending TTS by emptying the queue file."""
-    _write_to_queue_file("")
+    """Clear pending TTS chunks from the queue directory."""
+    _clean_queue_dir()
 
 
 def on_agent_reply(text: str):
     """Triggered when a full response is ready to be spoken.
-    Writes cleaned text to the queue file for the server to pick up."""
+    Chunks the text and writes individual files for the server to pick up."""
     try:
         if not text:
             return
         cleaned = clean_text_for_tts(text)
         if not cleaned:
             return
-        # File queue: write all text at once (server polls for file changes).
-        # Chunking is kept for future HTTP support but not used with file queue
-        # since each write overwrites the file.
-        _write_to_queue_file(cleaned)
+        chunks = chunk_text(cleaned)
+        if not chunks:
+            return
+        _write_chunks_to_queue(chunks)
     except Exception:
         pass

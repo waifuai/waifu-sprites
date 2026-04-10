@@ -497,6 +497,9 @@ const ttsSkipForward = document.getElementById('ttsSkipForward');
 const ttsChunkInfo = document.getElementById('ttsChunkInfo');
 const ttsChunkText = document.getElementById('ttsChunkText');
 
+let ttsPollInterval = 2000; // poll every 2s when idle
+let ttsPollTimer = null;
+
 async function pollTTS() {
   try {
     const res = await fetch('/tts/status');
@@ -504,11 +507,15 @@ async function pollTTS() {
 
     if (data.error) {
       ttsBar.classList.remove('active');
+      scheduleTTS(2000);
       return;
     }
 
     const isActive = data.playing || data.queue_size > 0;
     ttsBar.classList.toggle('active', isActive);
+
+    // Poll faster when active, slower when idle
+    const nextInterval = isActive ? 500 : 2000;
 
     if (isActive) {
       const cur = (data.batch_current ?? -1) + 1; // 1-indexed display
@@ -524,9 +531,16 @@ async function pollTTS() {
         ttsChunkText.textContent = '';
       }
     }
+    scheduleTTS(nextInterval);
   } catch {
     ttsBar.classList.remove('active');
+    scheduleTTS(2000);
   }
+}
+
+function scheduleTTS(ms) {
+  clearTimeout(ttsPollTimer);
+  ttsPollTimer = setTimeout(pollTTS, ms);
 }
 
 async function ttsSkip(direction) {
@@ -537,7 +551,7 @@ async function ttsSkip(direction) {
       body: JSON.stringify({ direction }),
     });
     // Poll immediately for UI update
-    setTimeout(pollTTS, 100);
+    scheduleTTS(100);
   } catch (e) {
     console.error('TTS skip error:', e);
   }
@@ -546,7 +560,7 @@ async function ttsSkip(direction) {
 async function ttsClear() {
   try {
     await fetch('/tts/clear', { method: 'POST' });
-    setTimeout(pollTTS, 100);
+    scheduleTTS(100);
   } catch (e) {
     console.error('TTS clear error:', e);
   }
@@ -644,9 +658,8 @@ document.addEventListener('keydown', e => {
 
 // Poll TTS status alongside sprite state
 setInterval(poll, 100);
-setInterval(pollTTS, 500);
 poll();
-pollTTS();
+pollTTS(); // self-scheduling via scheduleTTS()
 </script>
 </body>
 </html>
