@@ -35,7 +35,7 @@ original_chat = cli.HermesCLI.chat
 
 
 def patched_init_agent(
-    self, model_override=None, runtime_override=None, route_label=None
+    self, model_override=None, runtime_override=None, route_label=None, request_overrides=None
 ):
     """
     Interpose agent initialization to inject lifecycle callbacks.
@@ -46,6 +46,7 @@ def patched_init_agent(
         model_override=model_override,
         runtime_override=runtime_override,
         route_label=route_label,
+        request_overrides=request_overrides,
     )
 
     # 2. If agent was initialized, wrap its callbacks
