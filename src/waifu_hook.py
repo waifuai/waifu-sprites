@@ -531,41 +531,9 @@ def _is_terminal_focused():
 
 
 def _flash_taskbar():
-    """Flash the terminal taskbar button when Neko-chan replies (only if unfocused)."""
-    import sys
+    """Show balloon notification in system tray when Neko-chan replies (only if unfocused)."""
     if _is_terminal_focused():
-        return  # Terminal is focused, no need to flash
-    try:
-        # Triple bell — more aggressive, more likely to trigger taskbar flash
-        sys.stderr.write('\a\a\a')
-        sys.stderr.flush()
-    except Exception:
-        pass
-    # PowerShell FlashWindowEx — directly flashes Windows taskbar button from WSL
-    try:
-        if "WSL_DISTRO_NAME" in os.environ:
-            ps_cmd = (
-                'Add-Type -TypeDefinition \'' 
-                'using System; using System.Runtime.InteropServices;'
-                'namespace Native {'
-                '[StructLayout(LayoutKind.Sequential)] public struct FLASHWINFO {'
-                'public uint cbSize; public IntPtr hwnd; public uint dwFlags;'
-                'public uint uCount; public uint dwTimeout;}'
-                'public class Flash {'
-                '[DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO fwi);'
-                '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();'
-                'public static void DoFlash() {'
-                'var f = new FLASHWINFO(); f.cbSize=20; f.hwnd=GetConsoleWindow();'
-                'f.dwFlags=0x0F; f.uCount=5; f.dwTimeout=0; FlashWindowEx(ref f);}'
-                '}}\' -Language CSharp; [Native.Flash]::DoFlash()'
-            )
-            subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-    except Exception:
-        pass
-    # Windows balloon notification — visible pop-up in system tray
+        return
     try:
         if "WSL_DISTRO_NAME" in os.environ:
             ps_notify = (
