@@ -1,12 +1,16 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const PORT = 8000;
 const TTS_PORT = 8001;
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
 const DISPLAY_STATS_FILE = path.join(__dirname, 'display_stats.json');
+
+// Path to hermes state database (Windows path)
+const HERMES_STATE_DB = path.join(process.env.USERPROFILE || process.env.HOME, '.hermes', 'state.db');
 
 let currentState = 'idle';
 let currentEmotion = null; // e1-e12 when set, null when using action state
@@ -469,6 +473,67 @@ const server = http.createServer((req, res) => {
     const htmlPath = path.join(__dirname, 'index.html');
     res.writeHead(200, { 'Content-Type': 'text/html' });
     return res.end(fs.readFileSync(htmlPath));
+  }
+
+  // GET /api/sessions - List sessions from hermes state.db
+  if (url.pathname === '/api/sessions' && req.method === 'GET') {
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    
+    if (!fs.existsSync(HERMES_STATE_DB)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Hermes state database not found' }));
+    }
+    
+    try {
+      // Use Python script to query SQLite (works on Windows)
+      const scriptPath = path.join(__dirname, 'query_sessions.py');
+      // On Windows, use 'python' (not 'python3')
+      const result = execSync(`python "${scriptPath}" "${HERMES_STATE_DB}" ${limit} ${offset}`, { encoding: 'utf8' });
+      const sessions = JSON.parse(result);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(sessions));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // GET /api/sessions/:id/messages - Get messages for a specific session
+  if (url.pathname.startsWith('/api/sessions/') && url.pathname.endsWith('/messages') && req.method === 'GET') {
+    const sessionId = url.pathname.split('/')[3];
+    
+    if (!fs.existsSync(HERMES_STATE_DB)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Hermes state database not found' }));
+    }
+    
+    try {
+      // Use Python script to query SQLite (works on Windows)
+      const scriptPath = path.join(__dirname, 'query_messages.py');
+      // On Windows, use 'python' (not 'python3')
+      const result = execSync(`python "${scriptPath}" "${HERMES_STATE_DB}" "${sessionId}"`, { encoding: 'utf8' });
+      const messages = JSON.parse(result);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(messages));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // Serve static files (JS, CSS, etc.)
+  const staticExtensions = ['.js', '.css', '.json', '.png', '.jpg', '.gif', '.ico'];
+  const ext = path.extname(url.pathname);
+  if (staticExtensions.includes(ext)) {
+    const filePath = path.join(__dirname, url.pathname);
+    if (fs.existsSync(filePath)) {
+      return serveFile(req, res, filePath);
+    }
   }
 
   res.writeHead(404);

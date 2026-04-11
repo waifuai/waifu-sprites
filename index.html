@@ -217,6 +217,300 @@
     color: #555;
     text-align: center;
   }
+
+  /* Chat Interface */
+  .chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #0f0f23;
+    border-top: 1px solid #333;
+    min-height: 200px;
+    max-height: 40vh;
+  }
+
+  .chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #16213e;
+    border-bottom: 1px solid #333;
+  }
+
+  .chat-header-title {
+    font-size: 0.9em;
+    color: #e94560;
+    font-weight: bold;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-header-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .chat-header-btn {
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    transition: all 0.15s;
+  }
+
+  .chat-header-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: #e94560;
+  }
+
+  .chat-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chat-message {
+    max-width: 80%;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    line-height: 1.4;
+  }
+
+  .user-message {
+    align-self: flex-end;
+    background: #e94560;
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+
+  .assistant-message {
+    align-self: flex-start;
+    background: #2d3a4a;
+    color: #eee;
+    border-bottom-left-radius: 4px;
+  }
+
+  .message-content {
+    word-wrap: break-word;
+  }
+
+  .message-time {
+    font-size: 0.7em;
+    color: rgba(255,255,255,0.5);
+    margin-top: 4px;
+    text-align: right;
+  }
+
+  .chat-viewer-info {
+    padding: 20px;
+    text-align: center;
+    color: #666;
+    font-size: 0.9em;
+    border-top: 1px solid #333;
+    background: #0f0f23;
+  }
+
+  /* Chat Sidebar */
+  .chat-sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 280px;
+    height: 100%;
+    background: #16213e;
+    border-right: 1px solid #333;
+    transform: translateX(-100%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-sidebar.visible {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .chat-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    background: #0f0f23;
+    border-bottom: 1px solid #333;
+  }
+
+  .chat-sidebar-header-title {
+    font-size: 1em;
+    color: #e94560;
+    font-weight: bold;
+  }
+
+  .chat-sidebar-header-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .chat-sidebar-btn {
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    transition: all 0.15s;
+  }
+
+  .chat-sidebar-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: #e94560;
+  }
+
+  .chat-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .chat-list-empty {
+    color: #666;
+    font-size: 0.85em;
+    text-align: center;
+    padding: 2em;
+  }
+
+  .chat-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .chat-list-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+
+  .chat-list-item.active {
+    background: rgba(233, 69, 96, 0.2);
+    border-left: 3px solid #e94560;
+  }
+
+  .chat-list-item-content {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .chat-list-item-name {
+    font-size: 0.85em;
+    color: #eee;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chat-list-item-meta {
+    font-size: 0.7em;
+    color: #666;
+    margin-top: 2px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .chat-list-item-preview {
+    font-size: 0.75em;
+    color: #888;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chat-list-item-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .chat-list-item:hover .chat-list-item-actions {
+    opacity: 1;
+  }
+
+  .chat-action-btn {
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    transition: all 0.15s;
+  }
+
+  .chat-action-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: #e94560;
+  }
+
+  .chat-action-delete:hover {
+    color: #ff4444;
+  }
+
+  /* Adjust layout for chat */
+  body.chat-mode .display-area {
+    max-height: 50vh;
+  }
+
+  body.chat-mode .controls,
+  body.chat-mode .tts-controls,
+  body.chat-mode .speed-bar {
+    display: none;
+  }
+
+  body.fullwindow .chat-container,
+  body.fullwindow .chat-sidebar {
+    display: none !important;
+  }
+
+  /* Chat Loading/Error States */
+  .chat-loading,
+  .chat-error,
+  .chat-empty {
+    padding: 20px;
+    text-align: center;
+    color: #666;
+    font-size: 0.9em;
+  }
+
+  .chat-error {
+    color: #ff4444;
+  }
+
+  .chat-list-error {
+    padding: 20px;
+    text-align: center;
+    color: #ff4444;
+    font-size: 0.85em;
+  }
 </style>
 </head>
 <body>
@@ -229,12 +523,43 @@
   <div class="waifu-selector">
     <label>Waifu:</label>
     <select id="waifuSelect"><option>loading...</option></select>
+    <button onclick="toggleChatMode()" style="margin-left:8px;padding:4px 8px;border:1px solid #e94560;background:transparent;color:#eee;border-radius:4px;cursor:pointer;font-size:0.8em" title="Toggle Chat Mode">💬</button>
   </div>
 </div>
 
 <div class="display-area" id="displayArea">
   <div class="no-asset" id="placeholder">Loading...</div>
 </div>
+
+<!-- Chat Viewer (Read-Only) -->
+<div class="chat-container" id="chatContainer">
+  <div class="chat-header">
+    <button class="chat-header-btn" type="button" data-action="toggle-chat-sidebar" title="Chat History">☰</button>
+    <span class="chat-header-title" id="chatTitle">Chat History</span>
+    <div class="chat-header-actions">
+      <button class="chat-header-btn" id="copySessionIdBtn" type="button" onclick="copySessionId()" title="Copy Session ID" style="display:none">📋</button>
+      <button class="chat-header-btn" type="button" onclick="refreshSessions()" title="Refresh">🔄</button>
+    </div>
+  </div>
+  <div class="chat-history" id="chatHistory"></div>
+  <div class="chat-viewer-info" id="chatViewerInfo">
+    <span>Select a chat from the sidebar to view history</span>
+  </div>
+</div>
+
+<!-- Chat Sidebar -->
+<div id="chatSidebar" class="chat-sidebar">
+  <div class="chat-sidebar-header">
+    <span class="chat-sidebar-header-title">Chat History</span>
+    <div class="chat-sidebar-header-actions">
+      <button class="chat-sidebar-btn" type="button" data-action="export-all-chats" title="Export All Chats">⬇</button>
+      <button class="chat-sidebar-btn" type="button" data-action="toggle-chat-sidebar" title="Close">✕</button>
+    </div>
+  </div>
+  <div id="chatList" class="chat-list"></div>
+</div>
+
+
 
 <div class="controls">
   <button id="manualToggle" onclick="toggleManual()" style="padding:6px 14px;border:1px solid #e94560;background:#e94560;color:#fff;border-radius:4px;cursor:pointer;font-size:0.9em;min-width:40px">⏸</button>
@@ -713,6 +1038,48 @@ document.addEventListener('keydown', e => {
 setInterval(poll, 100);
 poll();
 pollTTS(); // self-scheduling via scheduleTTS()
+
+// Initialize chat browser
+document.addEventListener('DOMContentLoaded', () => {
+  // Restore sidebar visibility
+  if (localStorage.getItem('waifuChatSidebarVisible') === 'true') {
+    var sidebar = document.getElementById('chatSidebar');
+    if (sidebar) sidebar.classList.add('visible');
+  }
+
+  // Restore chat mode
+  if (localStorage.getItem('waifuChatMode') === 'true') {
+    document.body.classList.add('chat-mode');
+  }
+});
+
+function toggleChatMode() {
+  document.body.classList.toggle('chat-mode');
+  var isChatMode = document.body.classList.contains('chat-mode');
+  localStorage.setItem('waifuChatMode', isChatMode.toString());
+  
+  // Resize display area when toggling chat mode
+  if (typeof resizeCanvas === 'function') {
+    setTimeout(resizeCanvas, 100);
+  }
+}
+
+function copySessionId() {
+  if (window.ChatBrowser && window.ChatBrowser.currentSessionId) {
+    navigator.clipboard.writeText(window.ChatBrowser.currentSessionId).then(() => {
+      // Visual feedback
+      const btn = document.getElementById('copySessionIdBtn');
+      const originalText = btn.textContent;
+      btn.textContent = '✓';
+      setTimeout(() => { btn.textContent = originalText; }, 1000);
+    }).catch(err => {
+      console.error('Failed to copy:', err);
+    });
+  }
+}
 </script>
+
+<!-- Chat Browser -->
+<script src="chat_manager.js"></script>
 </body>
 </html>
