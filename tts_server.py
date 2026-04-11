@@ -385,6 +385,24 @@ def tts_status():
         })
 
 
+@app.route("/tts/speed", methods=["GET", "POST"])
+def tts_speed():
+    """Get or set TTS playback speed."""
+    global SPEED
+    if request.method == "GET":
+        return jsonify({"speed": SPEED})
+    data = request.json or {}
+    new_speed = data.get("speed", 1.0)
+    try:
+        new_speed = float(new_speed)
+        new_speed = max(0.5, min(2.0, new_speed))  # clamp 0.5x - 2.0x (Kokoro limit)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid speed value"}), 400
+    SPEED = new_speed
+    print(f"[TTS] Speed set to {SPEED}x", flush=True)
+    return jsonify({"success": True, "speed": SPEED})
+
+
 @app.route("/tts/skip", methods=["POST"])
 def tts_skip():
     """Skip forward or backward in the current TTS batch."""

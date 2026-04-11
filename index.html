@@ -70,6 +70,7 @@
   body.fullwindow .header,
   body.fullwindow .controls,
   body.fullwindow .tts-controls,
+  body.fullwindow .speed-bar,
   body.fullwindow .debug-bar {
     display: none !important;
   }
@@ -198,6 +199,16 @@
   }
   .tts-bar { display: none; }
   .tts-bar.active { display: flex; }
+  .speed-bar {
+    padding: 4px 12px;
+    background: #0f0f23;
+    border-top: 1px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .tts-speed-control { display: flex; align-items: center; gap: 4px; }
+  .tts-speed-control input[type=range] { cursor: pointer; }
 
   .debug-bar {
     padding: 6px 12px;
@@ -239,6 +250,15 @@
   <button id="ttsSkipForward" onclick="ttsSkip('forward')" disabled title="Skip forward">⏭</button>
   <span class="tts-chunk-info" id="ttsChunkInfo">—</span>
   <span class="tts-chunk-text" id="ttsChunkText"></span>
+</div>
+<div class="speed-bar" id="speedBar">
+  <span class="tts-speed-control">
+    <label style="font-size:0.75em;color:#a29bfe;margin-right:2px">⚡ Speed</label>
+    <input type="range" id="ttsSpeed" min="0.5" max="2.0" step="0.1" value="1.0"
+           style="width:60px;accent-color:#6c5ce7;vertical-align:middle"
+           oninput="ttsSetSpeed(this.value)" title="Speech speed" />
+    <span id="ttsSpeedValue" style="font-size:0.75em;color:#a29bfe;min-width:30px;display:inline-block">1.0x</span>
+  </span>
 </div>
 <div class="debug-bar" id="debugBar">polling...</div>
 
@@ -565,6 +585,39 @@ async function ttsClear() {
     console.error('TTS clear error:', e);
   }
 }
+
+async function ttsSetSpeed(val) {
+  const speed = parseFloat(val);
+  document.getElementById('ttsSpeedValue').textContent = speed.toFixed(1) + 'x';
+  try { localStorage.setItem('ttsSpeed', speed.toString()); } catch {}
+  try {
+    await fetch('/tts/speed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speed }),
+    });
+  } catch (e) {
+    console.error('TTS speed error:', e);
+  }
+}
+
+// Load saved speed on startup, push to server
+(async function loadTtsSpeed() {
+  let speed = 1.0;
+  try {
+    const saved = parseFloat(localStorage.getItem('ttsSpeed'));
+    if (!isNaN(saved) && saved >= 0.5 && saved <= 2.0) speed = saved;
+  } catch {}
+  document.getElementById('ttsSpeed').value = speed;
+  document.getElementById('ttsSpeedValue').textContent = speed.toFixed(1) + 'x';
+  try {
+    await fetch('/tts/speed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speed }),
+    });
+  } catch {}
+})();
 
 // ── Full Window Toggle ─────────────────────────────────────────────────────
 function toggleFullWindow() {

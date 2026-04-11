@@ -237,13 +237,17 @@ const server = http.createServer((req, res) => {
         if (set) currentSet = set;
         if (EMOTIONS.includes(state)) {
           // Emotion state (e1-e12) - takes priority over action state
-          currentEmotion = state;
-          console.log(`Emotion -> ${EMOTION_NAMES[state] || state}`);
+          if (currentEmotion !== state) {
+            currentEmotion = state;
+            console.log(`Emotion -> ${EMOTION_NAMES[state] || state}`);
+          }
         } else if (STATES.includes(state)) {
           // Action state - clear emotion so action sprite shows
-          currentState = state;
-          currentEmotion = null;
-          console.log(`State -> ${state}`);
+          if (currentState !== state) {
+            currentState = state;
+            currentEmotion = null;
+            console.log(`State -> ${state}`);
+          }
         }
         // Track what will actually be displayed
         const label = stateLabel(currentState, currentEmotion);
@@ -387,6 +391,30 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify(data));
     });
     return;
+  }
+
+  // GET/POST /tts/speed — get or set TTS playback speed
+  if (url.pathname === '/tts/speed') {
+    if (req.method === 'GET') {
+      proxyTTS('/tts/speed', 'GET').then(data => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      });
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        let parsed = {};
+        try { parsed = JSON.parse(body); } catch {}
+        proxyTTS('/tts/speed', 'POST', parsed).then(data => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(data));
+        });
+      });
+      return;
+    }
   }
 
   // GET /sets - list available waifu sets
