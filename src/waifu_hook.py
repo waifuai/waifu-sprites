@@ -585,12 +585,33 @@ def _flash_taskbar():
         pass
 
 
+# Patterns that should never be spoken — system messages, interruptions, status noise
+_TTS_SKIP_PATTERNS = [
+    r"Operation interrupted",
+    r"_\[Interrupted",
+    r"waiting for model response",
+    r"\d+\.\d*s elapsed",
+    r"processing new message",
+]
+
+
+def _is_system_message(text: str) -> bool:
+    """Check if text is a system/interruption message that shouldn't be TTS'd."""
+    for pattern in _TTS_SKIP_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
+
 def on_agent_reply(text: str):
     """Triggered when a full response is ready to be spoken.
     Chunks the text and writes individual files for the server to pick up."""
     try:
         _flash_taskbar()
         if not text:
+            return
+        # Skip system/interruption messages — don't waste TTS on noise
+        if _is_system_message(text):
             return
         cleaned = clean_text_for_tts(text)
         if not cleaned:
