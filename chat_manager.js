@@ -228,7 +228,8 @@ window.ChatBrowser = {
   loadSessions: loadSessions,
   loadSession: loadSession,
   refreshSessions: refreshSessions,
-  toggleChatSidebar: toggleChatSidebar
+  toggleChatSidebar: toggleChatSidebar,
+  get currentSessionId() { return currentSessionId; }
 };
 
 // Expose functions for onclick handlers
