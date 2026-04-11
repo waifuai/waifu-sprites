@@ -10,10 +10,10 @@ const VIDEOS_DIR = path.join(__dirname, 'videos');
 const DISPLAY_STATS_FILE = path.join(__dirname, 'display_stats.json');
 
 // Path to hermes state database (works for both Windows and WSL)
-// Try Windows path first, then WSL path
-const HERMES_STATE_DB_WINDOWS = path.join(process.env.USERPROFILE || '', '.hermes', 'state.db');
+// Prefer WSL path first (where hermes agent writes), fall back to Windows path
 const HERMES_STATE_DB_WSL = path.join(process.env.HOME || '', '.hermes', 'state.db');
-const HERMES_STATE_DB = fs.existsSync(HERMES_STATE_DB_WINDOWS) ? HERMES_STATE_DB_WINDOWS : HERMES_STATE_DB_WSL;
+const HERMES_STATE_DB_WINDOWS = path.join(process.env.USERPROFILE || '', '.hermes', 'state.db');
+const HERMES_STATE_DB = fs.existsSync(HERMES_STATE_DB_WSL) ? HERMES_STATE_DB_WSL : HERMES_STATE_DB_WINDOWS;
 
 // Detect Python command (python on Windows, python3 on Linux/WSL)
 const PYTHON_CMD = process.platform === 'win32' ? 'python' : 'python3';
@@ -229,6 +229,7 @@ const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);

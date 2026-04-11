@@ -2,11 +2,13 @@
 // Loads sessions from hermes state.db via server API
 
 const API_BASE = window.location.origin;
+const REFRESH_INTERVAL = 30000; // Auto-refresh every 30s
 
 // State
 let currentSessionId = null;
 let sessions = [];
 let isLoading = false;
+let refreshTimer = null;
 
 // DOM elements
 let chatHistory = null;
@@ -32,16 +34,37 @@ function initChatBrowser() {
   // Set up event listeners
   setupEventListeners();
 
+  // Auto-refresh sessions periodically
+  startAutoRefresh();
+
   console.log('ChatBrowser: Initialized');
 }
 
-// Load sessions from API
+// Start auto-refresh timer
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    // Only refresh if page is visible
+    if (!document.hidden) {
+      loadSessions();
+      // Also refresh current session messages if viewing one
+      if (currentSessionId) {
+        loadSessionMessages(currentSessionId);
+      }
+    }
+  }, REFRESH_INTERVAL);
+}
+
+// Load sessions from API (with cache-busting)
 async function loadSessions() {
   if (isLoading) return;
   isLoading = true;
 
   try {
-    const response = await fetch(API_BASE + '/api/sessions?limit=50');
+    const ts = Date.now();
+    const response = await fetch(API_BASE + '/api/sessions?limit=200&_ts=' + ts, {
+      cache: 'no-store'
+    });
     if (!response.ok) {
       throw new Error('Failed to load sessions');
     }
@@ -51,7 +74,7 @@ async function loadSessions() {
     console.log('ChatBrowser: Loaded ' + sessions.length + ' sessions');
   } catch (error) {
     console.error('ChatBrowser: Failed to load sessions', error);
-    renderError('Failed to load chat history. Is hermes-agent running?');
+    renderError('Failed to load chat history. Is the server running?');
   } finally {
     isLoading = false;
   }
@@ -94,8 +117,6 @@ function renderSessionList() {
 
 // Load and display a specific session
 async function loadSession(sessionId) {
-  if (sessionId === currentSessionId) return;
-
   currentSessionId = sessionId;
   renderSessionList(); // Update active state
 
@@ -107,8 +128,16 @@ async function loadSession(sessionId) {
   chatHistory.innerHTML = '<div class="chat-loading">Loading messages...</div>';
   chatViewerInfo.style.display = 'none';
 
+  await loadSessionMessages(sessionId);
+}
+
+// Load messages for a session (separate so auto-refresh can call it)
+async function loadSessionMessages(sessionId) {
   try {
-    const response = await fetch(API_BASE + `/api/sessions/${sessionId}/messages`);
+    const ts = Date.now();
+    const response = await fetch(API_BASE + `/api/sessions/${sessionId}/messages?_ts=${ts}`, {
+      cache: 'no-store'
+    });
     if (!response.ok) {
       throw new Error('Failed to load messages');
     }
@@ -195,7 +224,7 @@ function escapeHtml(str) {
 
 // Setup event listeners
 function setupEventListeners() {
-  // Sidebar toggle
+  // Sidebar toggle and refresh
   document.addEventListener('click', (event) => {
     const actionEl = event.target.closest('[data-action]');
     if (!actionEl) return;
@@ -215,11 +244,19 @@ function toggleChatSidebar() {
   sidebar.classList.toggle('visible');
   const isVisible = sidebar.classList.contains('visible');
   localStorage.setItem('waifuChatSidebarVisible', isVisible.toString());
+
+  // Refresh when opening sidebar
+  if (isVisible) {
+    loadSessions();
+  }
 }
 
 // Refresh sessions
 function refreshSessions() {
   loadSessions();
+  if (currentSessionId) {
+    loadSessionMessages(currentSessionId);
+  }
 }
 
 // Expose to global scope
