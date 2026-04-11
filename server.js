@@ -9,8 +9,14 @@ const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
 const DISPLAY_STATS_FILE = path.join(__dirname, 'display_stats.json');
 
-// Path to hermes state database (Windows path)
-const HERMES_STATE_DB = path.join(process.env.USERPROFILE || process.env.HOME, '.hermes', 'state.db');
+// Path to hermes state database (works for both Windows and WSL)
+// Try Windows path first, then WSL path
+const HERMES_STATE_DB_WINDOWS = path.join(process.env.USERPROFILE || '', '.hermes', 'state.db');
+const HERMES_STATE_DB_WSL = path.join(process.env.HOME || '', '.hermes', 'state.db');
+const HERMES_STATE_DB = fs.existsSync(HERMES_STATE_DB_WINDOWS) ? HERMES_STATE_DB_WINDOWS : HERMES_STATE_DB_WSL;
+
+// Detect Python command (python on Windows, python3 on Linux/WSL)
+const PYTHON_CMD = process.platform === 'win32' ? 'python' : 'python3';
 
 let currentState = 'idle';
 let currentEmotion = null; // e1-e12 when set, null when using action state
@@ -486,10 +492,9 @@ const server = http.createServer((req, res) => {
     }
     
     try {
-      // Use Python script to query SQLite (works on Windows)
+      // Use Python script to query SQLite (works on Windows and WSL)
       const scriptPath = path.join(__dirname, 'query_sessions.py');
-      // On Windows, use 'python' (not 'python3')
-      const result = execSync(`python "${scriptPath}" "${HERMES_STATE_DB}" ${limit} ${offset}`, { encoding: 'utf8' });
+      const result = execSync(`${PYTHON_CMD} "${scriptPath}" "${HERMES_STATE_DB}" ${limit} ${offset}`, { encoding: 'utf8' });
       const sessions = JSON.parse(result);
       
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -511,10 +516,9 @@ const server = http.createServer((req, res) => {
     }
     
     try {
-      // Use Python script to query SQLite (works on Windows)
+      // Use Python script to query SQLite (works on Windows and WSL)
       const scriptPath = path.join(__dirname, 'query_messages.py');
-      // On Windows, use 'python' (not 'python3')
-      const result = execSync(`python "${scriptPath}" "${HERMES_STATE_DB}" "${sessionId}"`, { encoding: 'utf8' });
+      const result = execSync(`${PYTHON_CMD} "${scriptPath}" "${HERMES_STATE_DB}" "${sessionId}"`, { encoding: 'utf8' });
       const messages = JSON.parse(result);
       
       res.writeHead(200, { 'Content-Type': 'application/json' });
