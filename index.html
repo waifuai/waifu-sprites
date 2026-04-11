@@ -683,12 +683,12 @@ function toggleManual() {
   }
 }
 
-function setState(state, force = false) {
+function setState(state, force = false, prefetchedData = null) {
   if (!force && state === currentState && currentSet) return;
   currentState = state;
   stateText.textContent = state + (manualMode ? ' [manual]' : '');
   updateControls();
-  fetchAsset();
+  fetchAsset(prefetchedData);
 }
 
 function setEmotion(emotion) {
@@ -735,12 +735,11 @@ function updateEmotionLabel() {
   }
 }
 
-async function fetchAsset() {
+async function fetchAsset(prefetchedData = null) {
   if (!currentSet) return;
 
   try {
-    const res = await fetch(`/current_state`);
-    const data = await res.json();
+    const data = prefetchedData || await (await fetch(`/current_state`)).json();
     currentEmotion = data.emotion || '';
     updateEmotionLabel();
 
@@ -816,7 +815,7 @@ async function poll() {
       lastServerEmotion = data.emotion || '';
       if (!manualMode) {
         currentEmotion = data.emotion || '';
-        setState(data.state, forceUpdate);
+        setState(data.state, forceUpdate, data);
       }
       // Report actual displayed state to server for tracking
       const displayLabel = currentEmotion
@@ -1035,7 +1034,7 @@ document.addEventListener('keydown', e => {
 });
 
 // Poll TTS status alongside sprite state
-setInterval(poll, 100);
+setInterval(poll, 1000);
 poll();
 pollTTS(); // self-scheduling via scheduleTTS()
 
