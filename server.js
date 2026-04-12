@@ -187,19 +187,46 @@ function findAsset(set, state) {
 }
 
 // Also check the videos/ folder for MP4 per state
+// Supports variants: e12.mp4, e12-1.mp4, e12-2.mp4 — picks random one
 function findVideo(stateName) {
-  for (const ext of ['.mp4', '.webm']) {
-    const p = path.join(VIDEOS_DIR, stateName + ext);
-    if (fs.existsSync(p)) return { path: p, type: 'video' };
-  }
-  const idx = STATES.indexOf(stateName);
-  if (idx >= 0) {
-    for (const ext of ['.mp4', '.webm']) {
-      const p = path.join(VIDEOS_DIR, `${idx + 1}${ext}`);
-      if (fs.existsSync(p)) return { path: p, type: 'video' };
+  if (!fs.existsSync(VIDEOS_DIR)) return null;
+
+  // Scan videos/ dir for all files matching this state (including variants)
+  const files = fs.readdirSync(VIDEOS_DIR);
+  const candidates = [];
+
+  for (const file of files) {
+    const ext = path.extname(file).toLowerCase();
+    if (ext !== '.mp4' && ext !== '.webm') continue;
+
+    const base = path.basename(file, ext);
+    // Match exact name (e12.mp4) or variant (e12-1.mp4, e12-2.mp4)
+    if (base === stateName || base.startsWith(stateName + '-')) {
+      candidates.push(path.join(VIDEOS_DIR, file));
     }
   }
-  return null;
+
+  // Also check numbered fallback (e.g. 'idle' -> '3.mp4')
+  if (candidates.length === 0) {
+    const idx = STATES.indexOf(stateName);
+    if (idx >= 0) {
+      for (const file of files) {
+        const ext = path.extname(file).toLowerCase();
+        if (ext !== '.mp4' && ext !== '.webm') continue;
+        const base = path.basename(file, ext);
+        if (base === String(idx + 1) || base.startsWith(String(idx + 1) + '-')) {
+          candidates.push(path.join(VIDEOS_DIR, file));
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Random pick from available variants
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  const ext = path.extname(chosen);
+  return { path: chosen, type: 'video' };
 }
 
 const MIME = {
