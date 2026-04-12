@@ -25,8 +25,9 @@ def get_windows_host_ip():
 
 
 # --- Configuration ---
-WAIFU_URL = f"http://{get_windows_host_ip()}:8000/state"
-VOICE_URL = f"http://{get_windows_host_ip()}:8001/tts"
+# Use 127.0.0.1 since node server runs in WSL (same machine)
+WAIFU_URL = "http://127.0.0.1:8000/state"
+VOICE_URL = "http://127.0.0.1:8001/tts"
 
 
 
