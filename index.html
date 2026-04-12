@@ -605,6 +605,7 @@ let currentEmotion = '';
 let currentSet = '';
 let sets = [];
 let usingVideo = false;
+let lastVideoAsset = null;
 let manualMode = false;
 let lastServerState = '';
 let lastServerEmotion = '';
@@ -749,11 +750,13 @@ async function fetchAsset(prefetchedData = null) {
     // Check for MP4 first
     if (data.videoAsset) {
       showDisplay('video');
-      const videoUrl = `${data.videoAsset}&t=${Date.now()}`;
-      videoEl.pause();
-      videoEl.src = videoUrl;
-      videoEl.load();
-      videoEl.play().catch(() => {});
+      if (data.videoAsset !== lastVideoAsset) {
+        lastVideoAsset = data.videoAsset;
+        videoEl.pause();
+        videoEl.src = data.videoAsset;
+        videoEl.load();
+        videoEl.play().catch(() => {});
+      }
       usingVideo = true;
       return;
     }
