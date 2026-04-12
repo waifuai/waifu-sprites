@@ -175,8 +175,8 @@ function renderMessages(messages) {
     </div>`;
   }).join('');
 
-  // Scroll to top (most recent messages at top)
-  chatHistory.scrollTop = 0;
+  // Scroll to bottom (newest messages)
+  chatHistory.scrollTop = chatHistory.scrollHeight;
 }
 
 // Render error message

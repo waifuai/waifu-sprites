@@ -15,9 +15,15 @@ try:
     cursor = conn.cursor()
     
     cursor.execute("""
+      WITH RECURSIVE session_tree AS (
+        SELECT id FROM sessions WHERE id = ?
+        UNION ALL
+        SELECT s.id FROM sessions s
+        INNER JOIN session_tree st ON s.parent_session_id = st.id
+      )
       SELECT role, content, tool_name, tool_calls, tool_call_id, timestamp
       FROM messages
-      WHERE session_id = ?
+      WHERE session_id IN (SELECT id FROM session_tree)
       ORDER BY timestamp, id
     """, [session_id])
     
