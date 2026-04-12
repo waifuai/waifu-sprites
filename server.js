@@ -58,6 +58,22 @@ function stateLabel(state, emotion) {
   return EMOTION_NAMES[display] || display;
 }
 
+// Map display label to numeric/emotion ID key (e.g. "4", "e7")
+function labelToFileId(label) {
+  // Already an emotion ID (e7, e12, etc) — return as-is
+  if (EMOTIONS.includes(label)) return label;
+  // Strip common display prefixes like "/// ", "> ", "~ ", "? ", "♥ ", etc.
+  const stripped = label.replace(/^[^a-zA-Z]+\s*/, '');
+  // Emotion name → emotion ID (embarrassed → e7)
+  for (const [eid, ename] of Object.entries(EMOTION_NAMES)) {
+    if (ename === stripped) return eid;
+  }
+  // Action state name → numeric ID (idle → 1, thinking → 4)
+  const stateIdx = STATES.indexOf(stripped);
+  if (stateIdx !== -1) return String(stateIdx + 1);
+  return label;
+}
+
 const STATES = [
   'idle', 'listening', 'speaking', 'thinking',
   'typing', 'searching', 'calculating', 'fixing',
@@ -262,7 +278,7 @@ const server = http.createServer((req, res) => {
         // Track what will actually be displayed
         const label = stateLabel(currentState, currentEmotion);
         recordDisplayDuration();
-        lastDisplayLabel = label;
+        lastDisplayLabel = labelToFileId(label);
         lastDisplayStart = Date.now();
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('OK');
@@ -459,10 +475,13 @@ const server = http.createServer((req, res) => {
       try {
         const { display, set } = JSON.parse(body);
         if (set) currentSet = set;
-        if (display && display !== lastDisplayLabel) {
-          recordDisplayDuration();
-          lastDisplayLabel = display;
-          lastDisplayStart = Date.now();
+        if (display) {
+          const fileId = labelToFileId(display);
+          if (fileId !== lastDisplayLabel) {
+            recordDisplayDuration();
+            lastDisplayLabel = fileId;
+            lastDisplayStart = Date.now();
+          }
         }
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('OK');
