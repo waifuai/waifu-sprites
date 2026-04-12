@@ -279,7 +279,7 @@ const server = http.createServer((req, res) => {
     const setName = url.searchParams.get('set') || waifuSets[0]?.name || '';
     const set = waifuSets.find(s => s.name === setName) || waifuSets[0];
     const asset = set ? findAsset(set, currentState) : null;
-    const video = findVideo(currentState);
+    const video = findVideo(currentEmotion || currentState);
 
     // If emotion is set, find the emotion frame (e1-e12)
     const emotionFrame = currentEmotion;
