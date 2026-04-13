@@ -187,9 +187,17 @@ function findAsset(set, state) {
 }
 
 // Also check the videos/ folder for MP4 per state
-// Supports variants: e12.mp4, e12-1.mp4, e12-2.mp4 — picks random one
+// Supports variants: e12.mp4, e12-1.mp4, e12-2.mp4 — picks one and sticks with it
+let cachedVideoState = null;
+let cachedVideoPath = null;
+
 function findVideo(stateName) {
   if (!fs.existsSync(VIDEOS_DIR)) return null;
+
+  // Return cached pick if same state (avoids flickering between variants on poll)
+  if (cachedVideoState === stateName && cachedVideoPath && fs.existsSync(cachedVideoPath)) {
+    return { path: cachedVideoPath, type: 'video' };
+  }
 
   // Scan videos/ dir for all files matching this state (including variants)
   const files = fs.readdirSync(VIDEOS_DIR);
@@ -223,9 +231,13 @@ function findVideo(stateName) {
 
   if (candidates.length === 0) return null;
 
-  // Random pick from available variants
+  // Pick randomly — cache ensures same pick during polling
   const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-  const ext = path.extname(chosen);
+
+  // Cache so polls don't flip-flop between variants
+  cachedVideoState = stateName;
+  cachedVideoPath = chosen;
+
   return { path: chosen, type: 'video' };
 }
 
@@ -292,6 +304,7 @@ const server = http.createServer((req, res) => {
           // Emotion state (e1-e12) - takes priority over action state
           if (currentEmotion !== state) {
             currentEmotion = state;
+            cachedVideoState = null; // force re-pick on state change
             console.log(`Emotion -> ${EMOTION_NAMES[state] || state}`);
           }
         } else if (STATES.includes(state)) {
@@ -299,6 +312,7 @@ const server = http.createServer((req, res) => {
           if (currentState !== state) {
             currentState = state;
             currentEmotion = null;
+            cachedVideoState = null; // force re-pick on state change
             console.log(`State -> ${state}`);
           }
         }
