@@ -1,21 +1,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const PORT = 8000;
 const TTS_PORT = 8001;
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
 const DISPLAY_STATS_FILE = path.join(__dirname, 'display_stats.json');
-
-// Path to hermes state database — uses HOME env var (works for any user)
-function getHermesDbPath() {
-  return path.join(process.env.HOME || '/home/' + process.env.USER || '/root', '.hermes', 'state.db');
-}
-
-// Detect Python command (python on Windows, python3 on Linux/WSL)
-const PYTHON_CMD = process.platform === 'win32' ? 'python' : 'python3';
 
 let currentState = 'idle';
 let currentEmotion = null; // e1-e12 when set, null when using action state
@@ -539,61 +530,6 @@ const server = http.createServer((req, res) => {
     const htmlPath = path.join(__dirname, 'index.html');
     res.writeHead(200, { 'Content-Type': 'text/html' });
     return res.end(fs.readFileSync(htmlPath));
-  }
-
-  // GET /api/sessions - List sessions from hermes state.db
-  if (url.pathname === '/api/sessions' && req.method === 'GET') {
-    const limit = parseInt(url.searchParams.get('limit') || '50');
-    const offset = parseInt(url.searchParams.get('offset') || '0');
-    
-    if (!fs.existsSync(getHermesDbPath())) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'Hermes state database not found' }));
-    }
-    
-    try {
-      // Use Python script to query SQLite (works on Windows and WSL)
-      const scriptPath = path.join(__dirname, 'query_sessions.py');
-      const result = execSync(`${PYTHON_CMD} "${scriptPath}" "${getHermesDbPath()}" ${limit} ${offset}`, { encoding: 'utf8' });
-      const sessions = JSON.parse(result);
-      
-      res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate'
-      });
-      res.end(JSON.stringify(sessions));
-    } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
-
-  // GET /api/sessions/:id/messages - Get messages for a specific session
-  if (url.pathname.startsWith('/api/sessions/') && url.pathname.endsWith('/messages') && req.method === 'GET') {
-    const sessionId = url.pathname.split('/')[3];
-    
-    if (!fs.existsSync(getHermesDbPath())) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'Hermes state database not found' }));
-    }
-    
-    try {
-      // Use Python script to query SQLite (works on Windows and WSL)
-      const scriptPath = path.join(__dirname, 'query_messages.py');
-      const result = execSync(`${PYTHON_CMD} "${scriptPath}" "${getHermesDbPath()}" "${sessionId}"`, { encoding: 'utf8' });
-      const messages = JSON.parse(result);
-      
-      res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate'
-      });
-      res.end(JSON.stringify(messages));
-    } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
   }
 
   // Serve static files (JS, CSS, etc.)
