@@ -420,8 +420,31 @@ def tts_speed():
         new_speed = max(0.5, min(2.0, new_speed))  # clamp 0.5x - 2.0x (Kokoro limit)
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid speed value"}), 400
+
     SPEED = new_speed
     print(f"[TTS] Speed set to {SPEED}x", flush=True)
+
+    # Flush already-rendered audio so new speed takes effect immediately
+    try:
+        sd.stop()  # interrupt currently playing chunk
+    except Exception:
+        pass
+    while not rendered_queue.empty():
+        try:
+            rendered_queue.get_nowait()
+            rendered_queue.task_done()
+        except queue.Empty:
+            break
+
+    # Re-queue remaining batch chunks for re-rendering at new speed
+    with batch_lock:
+        if batch_items and batch_current >= 0:
+            for i in range(batch_current + 1, len(batch_items)):
+                item = batch_items[i]
+                if item:
+                    print(f"[SPEED RE-RENDER] Re-queuing chunk {i} at {SPEED}x", flush=True)
+                    tts_queue.put(item)
+
     return jsonify({"success": True, "speed": SPEED})
 
 
