@@ -220,12 +220,34 @@ def monitor_queue_file():
         time.sleep(0.1)
 
 
+# ── Clear stale queue files from last session (before any monitors start) ──
+try:
+    if os.path.exists(QUEUE_FILE):
+        open(QUEUE_FILE, "w").close()
+        print(f"[CLEANUP] Cleared stale queue file: {QUEUE_FILE}", flush=True)
+except Exception as e:
+    print(f"[CLEANUP] Could not clear queue file: {e}", flush=True)
+QUEUE_DIR = os.path.join(os.path.expanduser("~"), ".waifu-voice-queue")
+try:
+    if os.path.isdir(QUEUE_DIR):
+        cleared = 0
+        for fname in os.listdir(QUEUE_DIR):
+            if fname.endswith((".txt", ".manifest")):
+                try:
+                    os.unlink(os.path.join(QUEUE_DIR, fname))
+                    cleared += 1
+                except Exception:
+                    pass
+        if cleared:
+            print(f"[CLEANUP] Cleared {cleared} stale file(s) from {QUEUE_DIR}", flush=True)
+except Exception as e:
+    print(f"[CLEANUP] Could not clear queue dir: {e}", flush=True)
+
 queue_monitor = threading.Thread(target=monitor_queue_file, daemon=True)
 queue_monitor.start()
 
 
 # ── Queue Directory Monitor (multi-file chunked) ──────────────────────────────
-QUEUE_DIR = os.path.join(os.path.expanduser("~"), ".waifu-voice-queue")
 _seen_manifests = set()
 
 
