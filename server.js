@@ -4,6 +4,25 @@ const path = require('path');
 
 const PORT = 8000;
 const TTS_PORT = 8001;
+
+// Resolve TTS host: use Windows host IP when running in WSL2, localhost otherwise
+function resolveTTSHost() {
+  try {
+    // WSL2 default gateway = Windows host IP (more reliable than /etc/resolv.conf nameserver)
+    const { execSync } = require('child_process');
+    const gw = execSync("ip route show default 2>/dev/null | awk '{print $3}'").toString().trim();
+    if (gw) return gw;
+  } catch {}
+  try {
+    // Fallback: resolv.conf nameserver
+    const resolv = fs.readFileSync('/etc/resolv.conf', 'utf8');
+    const match = resolv.match(/nameserver\s+(\d+\.\d+\.\d+\.\d+)/);
+    if (match) return match[1];
+  } catch {}
+  return '127.0.0.1';
+}
+const TTS_HOST = resolveTTSHost();
+console.log(`TTS proxy target: ${TTS_HOST}:${TTS_PORT}`);
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
 const DISPLAY_STATS_FILE = path.join(__dirname, 'display_stats.json');
@@ -398,7 +417,7 @@ const server = http.createServer((req, res) => {
   function proxyTTS(targetPath, method, body) {
     return new Promise((resolve, reject) => {
       const options = {
-        hostname: '127.0.0.1',
+        hostname: TTS_HOST,
         port: TTS_PORT,
         path: targetPath,
         method: method,
@@ -412,7 +431,7 @@ const server = http.createServer((req, res) => {
           catch { resolve({ raw: data, status: tres.statusCode }); }
         });
       });
-      req.on('error', () => resolve({ error: 'TTS server unavailable' }));
+      req.on('error', (e) => { console.error(`[PROXY] TTS request failed:`, e.message); resolve({ error: 'TTS server unavailable' }); });
       if (body) req.write(JSON.stringify(body));
       req.end();
     });
@@ -466,7 +485,9 @@ const server = http.createServer((req, res) => {
       req.on('end', () => {
         let parsed = {};
         try { parsed = JSON.parse(body); } catch {}
+        console.log(`[PROXY] Speed POST -> ${TTS_HOST}:${TTS_PORT} body:`, parsed);
         proxyTTS('/tts/speed', 'POST', parsed).then(data => {
+          console.log(`[PROXY] Speed response:`, data);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(data));
         });
