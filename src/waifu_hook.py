@@ -340,67 +340,6 @@ def on_agent_idle(*args, **kwargs):
 
 
 
-def _is_terminal_focused():
-    """Check if the terminal window is currently in the foreground. Returns True if focused or if check fails."""
-    try:
-        if "WSL_DISTRO_NAME" not in os.environ:
-            return True
-        csharp_code = (
-            'using System; using System.Runtime.InteropServices; using System.Text;'
-            'public class Focus {'
-            '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'
-            '[DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder sb, int nMaxCount);'
-            '[DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);'
-            'public static string GetTitle() {'
-            'var h = GetForegroundWindow();'
-            'var sb = new StringBuilder(GetWindowTextLength(h) + 1);'
-            'GetWindowText(h, sb, sb.Capacity);'
-            'return sb.ToString(); }'
-            '}'
-        )
-        ps_cmd = (
-            "Add-Type -TypeDefinition '" + csharp_code + "' -Language CSharp; "
-            "$t = [Focus]::GetTitle(); "
-            "if ($t -match 'Windows Terminal|PowerShell|Command Prompt|pwsh|Waifu Hermes') { 'True' } else { 'False' }"
-        )
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
-            capture_output=True, text=True, timeout=3
-        )
-        return "True" in result.stdout
-    except Exception:
-        return True  # If check fails, assume focused (no spam)
-
-
-def _flash_taskbar():
-    """Show balloon notification in system tray when Neko-chan replies (only if unfocused)."""
-    if _is_terminal_focused():
-        return
-    try:
-        if "WSL_DISTRO_NAME" in os.environ:
-            ps_notify = (
-                'Add-Type -AssemblyName System.Windows.Forms;'
-                '$balloon = New-Object System.Windows.Forms.NotifyIcon;'
-                '$balloon.Icon = [System.Drawing.SystemIcons]::Information;'
-                '$balloon.Visible = $true;'
-                '$balloon.ShowBalloonTip(3000, "Neko-chan", "Reply received nya~",'
-                '[System.Windows.Forms.ToolTipIcon]::Info);'
-                'Start-Sleep -Seconds 4; $balloon.Dispose()'
-            )
-            subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-Command", ps_notify],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-    except Exception:
-        pass
-
-
-
-
-
 def on_agent_reply(text: str):
-    """Called when agent reply is ready — flash taskbar notification."""
-    try:
-        _flash_taskbar()
-    except Exception:
-        pass
+    """Called when agent reply is ready — no-op (notifications removed)."""
+    pass
