@@ -3,26 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 8000;
-const TTS_PORT = 8001;
 
-// Resolve TTS host: use Windows host IP when running in WSL2, localhost otherwise
-function resolveTTSHost() {
-  try {
-    // WSL2 default gateway = Windows host IP (more reliable than /etc/resolv.conf nameserver)
-    const { execSync } = require('child_process');
-    const gw = execSync("ip route show default 2>/dev/null | awk '{print $3}'").toString().trim();
-    if (gw) return gw;
-  } catch {}
-  try {
-    // Fallback: resolv.conf nameserver
-    const resolv = fs.readFileSync('/etc/resolv.conf', 'utf8');
-    const match = resolv.match(/nameserver\s+(\d+\.\d+\.\d+\.\d+)/);
-    if (match) return match[1];
-  } catch {}
-  return '127.0.0.1';
-}
-const TTS_HOST = resolveTTSHost();
-console.log(`TTS proxy target: ${TTS_HOST}:${TTS_PORT}`);
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const VIDEOS_DIR = path.join(__dirname, 'videos');
 const DISPLAY_STATS_FILE = path.join(__dirname, 'display_stats.json');
@@ -413,88 +394,6 @@ const server = http.createServer((req, res) => {
     return serveFile(req, res, filePath);
   }
 
-  // ── TTS Proxy Helper ──────────────────────────────────────────────────────
-  function proxyTTS(targetPath, method, body) {
-    return new Promise((resolve, reject) => {
-      const options = {
-        hostname: TTS_HOST,
-        port: TTS_PORT,
-        path: targetPath,
-        method: method,
-        headers: { 'Content-Type': 'application/json' },
-      };
-      const req = http.request(options, (tres) => {
-        let data = '';
-        tres.on('data', c => data += c);
-        tres.on('end', () => {
-          try { resolve(JSON.parse(data)); }
-          catch { resolve({ raw: data, status: tres.statusCode }); }
-        });
-      });
-      req.on('error', (e) => { console.error(`[PROXY] TTS request failed:`, e.message); resolve({ error: 'TTS server unavailable' }); });
-      if (body) req.write(JSON.stringify(body));
-      req.end();
-    });
-  }
-
-  // GET /tts/status — TTS queue state for the UI
-  if (url.pathname === '/tts/status' && req.method === 'GET') {
-    proxyTTS('/tts/status', 'GET').then(data => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(data));
-    });
-    return;
-  }
-
-  // POST /tts/skip — skip forward or backward
-  if (url.pathname === '/tts/skip' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
-      let parsed = {};
-      try { parsed = JSON.parse(body); } catch {}
-      proxyTTS('/tts/skip', 'POST', parsed).then(data => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(data));
-      });
-    });
-    return;
-  }
-
-  // POST /tts/clear — clear TTS queue
-  if (url.pathname === '/tts/clear' && req.method === 'POST') {
-    proxyTTS('/clear', 'POST').then(data => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(data));
-    });
-    return;
-  }
-
-  // GET/POST /tts/speed — get or set TTS playback speed
-  if (url.pathname === '/tts/speed') {
-    if (req.method === 'GET') {
-      proxyTTS('/tts/speed', 'GET').then(data => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(data));
-      });
-      return;
-    }
-    if (req.method === 'POST') {
-      let body = '';
-      req.on('data', c => body += c);
-      req.on('end', () => {
-        let parsed = {};
-        try { parsed = JSON.parse(body); } catch {}
-        console.log(`[PROXY] Speed POST -> ${TTS_HOST}:${TTS_PORT} body:`, parsed);
-        proxyTTS('/tts/speed', 'POST', parsed).then(data => {
-          console.log(`[PROXY] Speed response:`, data);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(data));
-        });
-      });
-      return;
-    }
-  }
 
   // GET /sets - list available waifu sets
   if (url.pathname === '/sets') {

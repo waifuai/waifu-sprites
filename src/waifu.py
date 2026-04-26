@@ -102,7 +102,7 @@ def patched_chat(self, message, images=None):
     else:
         waifu_hook.on_agent_idle()
 
-    # 5. TTS in background thread
+    # 5. Background reply notification (taskbar flash)
     if response:
         threading.Thread(
             target=waifu_hook.on_agent_reply, args=(response,), daemon=True

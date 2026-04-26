@@ -69,8 +69,6 @@
   /* Full window mode */
   body.fullwindow .header,
   body.fullwindow .controls,
-  body.fullwindow .tts-controls,
-  body.fullwindow .speed-bar,
   body.fullwindow .debug-bar {
     display: none !important;
   }
@@ -160,56 +158,6 @@
     font-weight: bold;
   }
 
-  .tts-controls {
-    padding: 8px 12px;
-    background: #0f0f23;
-    border-top: 1px solid #333;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-  }
-  .tts-controls button {
-    padding: 5px 12px;
-    border: 1px solid #6c5ce7;
-    background: transparent;
-    color: #a29bfe;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.85em;
-    transition: all 0.15s;
-    min-width: 36px;
-  }
-  .tts-controls button:hover { background: #6c5ce7; color: #fff; }
-  .tts-controls button:disabled { opacity: 0.3; cursor: default; }
-  .tts-controls button:disabled:hover { background: transparent; color: #a29bfe; }
-  .tts-chunk-info {
-    font-size: 0.8em;
-    color: #a29bfe;
-    min-width: 80px;
-    text-align: center;
-  }
-  .tts-chunk-text {
-    font-size: 0.7em;
-    color: #666;
-    max-width: 300px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .tts-bar { display: none; }
-  .tts-bar.active { display: flex; }
-  .speed-bar {
-    padding: 4px 12px;
-    background: #0f0f23;
-    border-top: 1px solid #333;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .tts-speed-control { display: flex; align-items: center; gap: 4px; }
-  .tts-speed-control input[type=range] { cursor: pointer; }
-
   .debug-bar {
     padding: 6px 12px;
     background: #0f0f23;
@@ -246,22 +194,6 @@
 </div>
 <div class="controls" style="border-top:none;padding-top:4px;">
   <div id="emotionControls" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center"></div>
-</div>
-<div class="tts-controls" id="ttsBar">
-  <button id="ttsSkipBack" onclick="ttsSkip('back')" disabled title="Skip back">⏮</button>
-  <button id="ttsClear" onclick="ttsClear()" title="Stop TTS">⏹</button>
-  <button id="ttsSkipForward" onclick="ttsSkip('forward')" disabled title="Skip forward">⏭</button>
-  <span class="tts-chunk-info" id="ttsChunkInfo">—</span>
-  <span class="tts-chunk-text" id="ttsChunkText"></span>
-</div>
-<div class="speed-bar" id="speedBar">
-  <span class="tts-speed-control">
-    <label style="font-size:0.75em;color:#a29bfe;margin-right:2px">⚡ Speed</label>
-    <input type="range" id="ttsSpeed" min="0.5" max="2.0" step="0.1" value="1.0"
-           style="width:60px;accent-color:#6c5ce7;vertical-align:middle"
-           oninput="ttsSetSpeed(this.value)" title="Speech speed" />
-    <span id="ttsSpeedValue" style="font-size:0.75em;color:#a29bfe;min-width:30px;display:inline-block">1.0x</span>
-  </span>
 </div>
 <div class="debug-bar" id="debugBar">polling...</div>
 
@@ -515,114 +447,6 @@ async function poll() {
   }
 }
 
-// ── TTS Controls ─────────────────────────────────────────────────────────────
-const ttsBar = document.getElementById('ttsBar');
-const ttsSkipBack = document.getElementById('ttsSkipBack');
-const ttsSkipForward = document.getElementById('ttsSkipForward');
-const ttsChunkInfo = document.getElementById('ttsChunkInfo');
-const ttsChunkText = document.getElementById('ttsChunkText');
-
-let ttsPollInterval = 2000; // poll every 2s when idle
-let ttsPollTimer = null;
-
-async function pollTTS() {
-  try {
-    const res = await fetch('/tts/status');
-    const data = await res.json();
-
-    if (data.error) {
-      ttsBar.classList.remove('active');
-      scheduleTTS(2000);
-      return;
-    }
-
-    const isActive = data.playing || data.queue_size > 0;
-    ttsBar.classList.toggle('active', isActive);
-
-    // Poll faster when active, slower when idle
-    const nextInterval = isActive ? 500 : 2000;
-
-    if (isActive) {
-      const cur = (data.batch_current ?? -1) + 1; // 1-indexed display
-      const total = data.batch_total ?? 0;
-      ttsChunkInfo.textContent = total > 0 ? `${cur}/${total}` : '...';
-      ttsSkipBack.disabled = cur <= 1;
-      ttsSkipForward.disabled = cur >= total && !data.playing;
-
-      if (data.current_text) {
-        ttsChunkText.textContent = data.current_text;
-        ttsChunkText.title = data.current_text;
-      } else {
-        ttsChunkText.textContent = '';
-      }
-    }
-    scheduleTTS(nextInterval);
-  } catch {
-    ttsBar.classList.remove('active');
-    scheduleTTS(2000);
-  }
-}
-
-function scheduleTTS(ms) {
-  clearTimeout(ttsPollTimer);
-  ttsPollTimer = setTimeout(pollTTS, ms);
-}
-
-async function ttsSkip(direction) {
-  try {
-    await fetch('/tts/skip', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ direction }),
-    });
-    // Poll immediately for UI update
-    scheduleTTS(100);
-  } catch (e) {
-    console.error('TTS skip error:', e);
-  }
-}
-
-async function ttsClear() {
-  try {
-    await fetch('/tts/clear', { method: 'POST' });
-    scheduleTTS(100);
-  } catch (e) {
-    console.error('TTS clear error:', e);
-  }
-}
-
-async function ttsSetSpeed(val) {
-  const speed = parseFloat(val);
-  document.getElementById('ttsSpeedValue').textContent = speed.toFixed(1) + 'x';
-  try { localStorage.setItem('ttsSpeed', speed.toString()); } catch {}
-  try {
-    await fetch('/tts/speed', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speed }),
-    });
-  } catch (e) {
-    console.error('TTS speed error:', e);
-  }
-}
-
-// Load saved speed on startup, push to server
-(async function loadTtsSpeed() {
-  let speed = 1.0;
-  try {
-    const saved = parseFloat(localStorage.getItem('ttsSpeed'));
-    if (!isNaN(saved) && saved >= 0.5 && saved <= 2.0) speed = saved;
-  } catch {}
-  document.getElementById('ttsSpeed').value = speed;
-  document.getElementById('ttsSpeedValue').textContent = speed.toFixed(1) + 'x';
-  try {
-    await fetch('/tts/speed', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speed }),
-    });
-  } catch {}
-})();
 
 // ── Full Window Toggle ─────────────────────────────────────────────────────
 function toggleFullWindow() {
@@ -714,10 +538,8 @@ document.addEventListener('keydown', e => {
   if (e.key === '0') { e.preventDefault(); resetView(); }
 });
 
-// Poll TTS status alongside sprite state
 setInterval(poll, 1000);
 poll();
-pollTTS(); // self-scheduling via scheduleTTS()
 </script>
 
 </body>
