@@ -1,33 +1,17 @@
 import subprocess
 import os
-import re
 import requests
 import time
 import random
 import json
 
-# --- TTS Chunking Config ---
-CHUNK_LIMIT = 300  # Max chars per TTS chunk
 
 
-def get_windows_host_ip():
-    """Get the Windows host IP address from WSL2."""
-    if "WSL_DISTRO_NAME" in os.environ:
-        try:
-            # Get default gateway from ip route (the Windows Host VM switch)
-            result = subprocess.run(["ip", "route"], capture_output=True, text=True)
-            for line in result.stdout.splitlines():
-                if line.startswith("default via"):
-                    return line.split(" ")[2]
-        except Exception:
-            pass
-    return "127.0.0.1"
 
 
 # --- Configuration ---
 # Use 127.0.0.1 since node server runs in WSL (same machine)
 WAIFU_URL = "http://127.0.0.1:8000/state"
-VOICE_URL = "http://127.0.0.1:8001/tts"
 
 
 
@@ -195,7 +179,7 @@ def _get_tool_state(function_name: str) -> str:
         return 'fixing'
     elif any(k in name_lower for k in ['delegate', 'skill', 'todo', 'memory', 'cron']):
         return 'thinking'
-    elif any(k in name_lower for k in ['speak', 'voice', 'tts', 'say']):
+    elif any(k in name_lower for k in ['speak', 'voice', 'say']):
         return 'speaking'
     else:
         return 'typing'
@@ -339,164 +323,21 @@ def on_agent_idle(*args, **kwargs):
     set_waifu_state("sleeping")
 
 
-# --- Voice/TTS Hook ---
 
 
-def clean_text_for_tts(text: str) -> str:
-    """Remove emojis, kaomoji, markdown, and formatting from text before TTS."""
-    # 1. Remove code blocks and inline code
-    text = re.sub(r"```[\s\S]*?```", "", text)
-    text = re.sub(r"`[^`]+`", "", text)
-
-    # 2. Remove markdown links but keep text
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-
-    # 3. Remove markdown bold/italic/headers
-    text = re.sub(r"\*\*?(.+?)\*\*?", r"\1", text)
-    text = re.sub(r"__(.+?)__", r"\1", text)
-    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-
-    # 4. Remove URLs
-    text = re.sub(r"https?://\S+", "", text)
-
-    # 5. Handle list markers (convert to sentence breaks)
-    text = re.sub(r"^\s*[-*+]\s+", ". ", text, flags=re.MULTILINE)
-
-    # 6. Target common kaomoji/emoticons primarily inside parentheses
-    text = re.sub(r"\([^\w\s\.,!\?]{2,}\)", "", text)
-
-    # 7. Specifically remove common "cat" or "waifu" style symbols and non-ASCII
-    non_ascii_symbols = [r"\u0298", r"\u2022", r"\uFEA5", r"\u00B4", r"\u03C9", r"`", r"\u30FB", r"^", r"~"]
-    for symbol in non_ascii_symbols:
-        text = text.replace(symbol, "")
-
-    # 8. Remove remaining non-ASCII characters
-    text = re.sub(r"[^\x20-\x7E\n]", "", text)
-
-    # 9. Clean up leftover punctuation artifacts from stripped emojis
-    text = re.sub(r"\([^\w\s]*\)", "", text)
-    text = re.sub(r"[\^\=\~]{2,}", "", text)
-
-    # 10. Normalize spaces before punctuation and after parens
-    text = re.sub(r"\s+([,\.!?;:\)])", r"\1", text)
-    text = re.sub(r"\(\s+", "(", text)
-
-    # 11. Convert newlines to sentence breaks and collapse whitespace
-    text = re.sub(r"\n+", ". ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # 12. Final punctuation cleanup
-    text = re.sub(r"\.+", ".", text)
-    text = re.sub(r"^\.+", "", text)
-
-    # Ensure terminal punctuation if missing
-    if text and not text.endswith((".", "!", "?")):
-        text += "."
-
-    return text
 
 
-def split_into_sentences(text: str) -> list:
-    """Split text into sentences by punctuation terminators.
-    Mirrors waifu-companion's splitIntoSentences() logic."""
-    matches = re.findall(r'[^.!?…]+[.!?…]?\s*|[^.!?…]+$', text)
-    return [s.strip() for s in matches if s.strip()]
 
 
-def chunk_text(text: str, limit: int = CHUNK_LIMIT) -> list:
-    """Group sentences into chunks under the character limit.
-    Mirrors waifu-companion's tts_queue_manager chunking logic."""
-    sentences = split_into_sentences(text)
-    chunks = []
-    current_chunk = ""
-
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) > limit and current_chunk:
-            chunks.append(current_chunk.strip())
-            current_chunk = sentence
-        else:
-            current_chunk += (" " if current_chunk else "") + sentence
-
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
-
-    return chunks
 
 
-def _get_queue_dir():
-    """Get path to the TTS queue directory, accessible from both WSL2 and Windows."""
-    if "WSL_DISTRO_NAME" in os.environ:
-        # Running in WSL2 — need Windows path via /mnt/c/Users/<name>/
-        try:
-            result = subprocess.run(
-                ["cmd.exe", "/c", "echo", "%USERNAME%"],
-                capture_output=True, text=True
-            )
-            win_user = result.stdout.strip()
-            if win_user:
-                return f"/mnt/c/Users/{win_user}/.waifu-voice-queue"
-        except Exception:
-            pass
-    # Running on Windows or fallback
-    return os.path.join(os.path.expanduser("~"), ".waifu-voice-queue")
-
-QUEUE_DIR = _get_queue_dir()
-
-# HTTP TTS doesn't work from WSL2 → Windows (networking issues).
-# Use multi-file queue exclusively — the server polls for chunk manifests.
-_HTTP_TTS_AVAILABLE = False
-
-_response_counter = 0
 
 
-def _write_chunks_to_queue(chunks: list):
-    """Write chunks as individual files with a manifest for the server to pick up."""
-    global _response_counter
-    try:
-        os.makedirs(QUEUE_DIR, exist_ok=True)
-
-        # Clean any previous pending response
-        _clean_queue_dir()
-
-        _response_counter += 1
-        resp_id = f"resp-{_response_counter:05d}"
-
-        # Write each chunk file
-        chunk_files = []
-        for i, chunk_text in enumerate(chunks):
-            filename = f"{resp_id}-chunk-{i+1:03d}.txt"
-            filepath = os.path.join(QUEUE_DIR, filename)
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(chunk_text)
-            chunk_files.append(filename)
-
-        # Write manifest last (server watches for this)
-        manifest_path = os.path.join(QUEUE_DIR, f"{resp_id}.manifest")
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(chunk_files))
-    except Exception:
-        pass
 
 
-def _clean_queue_dir():
-    """Remove all chunk and manifest files from the queue directory."""
-    try:
-        if not os.path.isdir(QUEUE_DIR):
-            return
-        for fname in os.listdir(QUEUE_DIR):
-            fpath = os.path.join(QUEUE_DIR, fname)
-            if fname.endswith((".txt", ".manifest")):
-                try:
-                    os.unlink(fpath)
-                except Exception:
-                    pass
-    except Exception:
-        pass
 
 
-def clear_tts_queue():
-    """Clear pending TTS chunks from the queue directory."""
-    _clean_queue_dir()
+
 
 
 def _is_terminal_focused():
@@ -554,40 +395,12 @@ def _flash_taskbar():
         pass
 
 
-# Patterns that should never be spoken — system messages, interruptions, status noise
-_TTS_SKIP_PATTERNS = [
-    r"Operation interrupted",
-    r"_\[Interrupted",
-    r"waiting for model response",
-    r"\d+\.\d*s elapsed",
-    r"processing new message",
-]
 
-
-def _is_system_message(text: str) -> bool:
-    """Check if text is a system/interruption message that shouldn't be TTS'd."""
-    for pattern in _TTS_SKIP_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
-            return True
-    return False
 
 
 def on_agent_reply(text: str):
-    """Triggered when a full response is ready to be spoken.
-    Chunks the text and writes individual files for the server to pick up."""
+    """Called when agent reply is ready — flash taskbar notification."""
     try:
         _flash_taskbar()
-        if not text:
-            return
-        # Skip system/interruption messages — don't waste TTS on noise
-        if _is_system_message(text):
-            return
-        cleaned = clean_text_for_tts(text)
-        if not cleaned:
-            return
-        chunks = chunk_text(cleaned)
-        if not chunks:
-            return
-        _write_chunks_to_queue(chunks)
     except Exception:
         pass
