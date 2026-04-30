@@ -1,0 +1,10 @@
+name: waifu-sprites
+version: 1.0.0
+description: "Animated sprite companion — auto-maps agent activity to sprite states"
+author: "WaifuAI"
+hooks:
+  - pre_tool_call
+  - post_tool_call
+  - post_llm_call
+  - on_session_start
+  - on_session_end

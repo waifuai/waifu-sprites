@@ -1,0 +1,16 @@
+{
+  "name": "waifu-sprites",
+  "label": "Waifu Sprites",
+  "description": "Video sprite companion — 12 action states + 12 emotion states",
+  "icon": "Heart",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/waifu-sprites",
+    "position": "end",
+    "hidden": true
+  },
+  "slots": ["overlay", "sidebar"],
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
