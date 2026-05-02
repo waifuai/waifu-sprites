@@ -137,6 +137,11 @@ def _on_post_tool_call(*, tool_name: str = "", args: Any = None,
     _write_state(state="error" if is_err else "idle")
 
 
+def _on_pre_llm_call(*, task_id: str = "", session_id: str = "", **_):
+    """Before LLM starts processing — show thinking."""
+    _write_state(state="thinking")
+
+
 def _on_post_llm_call(*, task_id: str = "", session_id: str = "",
                       assistant_response: Any = None,
                       assistant_message: Any = None,
@@ -179,6 +184,7 @@ def register(ctx) -> None:
     """Called by the plugin loader. Registers all hooks."""
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_end", _on_session_end)
