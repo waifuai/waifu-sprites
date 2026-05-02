@@ -163,7 +163,7 @@ def _on_post_llm_call(*, task_id: str = "", session_id: str = "",
 
     if text:
         emotion = _detect_emotion(text)
-        _write_state(emotion=emotion)
+        _write_state(state="speaking", emotion=emotion)
     else:
         _write_state(state="idle")
 
@@ -173,9 +173,19 @@ def _on_session_start(*, session_id: str = "", **_):
     _write_state(state="listening")
 
 
-def _on_session_end(*, session_id: str = "", **_):
-    """Agent session ended — show sleeping."""
-    _write_state(state="sleeping")
+def _on_session_end(*, session_id: str = "", completed: bool = False,
+                     interrupted: bool = False, **_):
+    """Agent turn ended — preserve emotion from post_llm_call.
+
+    on_session_end fires after every run_conversation() call (every turn),
+    NOT just when the session truly exits. Setting 'sleeping' here would
+    overwrite the detected emotion immediately after every response.
+
+    Only set sleeping when the session is truly ending (atexit handler).
+    """
+    # Don't override emotion on normal turn completion.
+    # The emotion from post_llm_call stays visible until next activity.
+    pass
 
 
 # ── Plugin registration ──────────────────────────────────────────
