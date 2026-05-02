@@ -1,5 +1,4 @@
 {
-  "videos_dir": "videos",
   "assets_dir": "assets",
   "poll_interval_ms": 2000,
   "overlay_enabled": true,

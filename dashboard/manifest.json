@@ -1,9 +1,9 @@
 {
   "name": "waifu-sprites",
   "label": "Waifu Sprites",
-  "description": "Video sprite companion — 12 action states + 12 emotion states",
+  "description": "Waifu sprite companion — 9 animation states mapped to agent activity",
   "icon": "Heart",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "tab": {
     "path": "/waifu-sprites",
     "position": "end",
