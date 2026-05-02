@@ -4,3 +4,4 @@ __pycache__/
 sprite_stats.json
 display_stats.json
 state.json
+assets/*.webp

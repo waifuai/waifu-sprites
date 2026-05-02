@@ -1,15 +1,18 @@
 """
-waifu-sprites dashboard plugin — video sprite backend.
+waifu-sprites dashboard plugin — sprite backend.
 
 Reads state from shared state file (~/.hermes/plugins/waifu-sprites/state.json).
-Agent writes to this file via waifu_hook.py or direct POST.
-Serves video sprites from the plugin's videos/ directory.
+Agent writes to this file via __init__.py hooks.
+Serves spritesheet from the plugin's assets/ directory.
+
+Spritesheet format:
+  - spritesheet.webp: 1536x1872 atlas, 8 cols x 9 rows, 192x208 per cell
+  - Each row is an animation state, each column is a frame
 """
 
 import os
 import json
 import time
-import random
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -19,16 +22,68 @@ router = APIRouter()
 # ── Paths ────────────────────────────────────────────────────────
 
 PLUGIN_DIR = Path(__file__).parent.parent
-VIDEOS_DIR = PLUGIN_DIR / "videos"
+ASSETS_DIR = PLUGIN_DIR / "assets"
+SPRITESHEET = ASSETS_DIR / "spritesheet.webp"
 STATE_FILE = PLUGIN_DIR / "state.json"
 
-# ── State definitions ────────────────────────────────────────────
+# ── Sprite atlas definition ───────────────────────────────────────
 
-STATES = [
-    "idle", "listening", "speaking", "thinking",
-    "typing", "searching", "calculating", "fixing",
-    "success", "error", "alert", "sleeping",
+ATLAS_WIDTH = 1536
+ATLAS_HEIGHT = 1872
+CELL_WIDTH = 192   # 1536 / 8
+CELL_HEIGHT = 208  # 1872 / 9
+COLS = 8
+ROWS = 9
+
+# Row definitions: row index, name, frame count, frame durations (ms)
+ATLAS_ROWS = [
+    {"row": 0, "name": "idle",          "frames": 6, "duration": 200},
+    {"row": 1, "name": "running-right",  "frames": 8, "duration": 120},
+    {"row": 2, "name": "running-left",   "frames": 8, "duration": 120},
+    {"row": 3, "name": "waving",         "frames": 4, "duration": 250},
+    {"row": 4, "name": "jumping",        "frames": 5, "duration": 180},
+    {"row": 5, "name": "failed",         "frames": 8, "duration": 150},
+    {"row": 6, "name": "waiting",        "frames": 6, "duration": 300},
+    {"row": 7, "name": "running",        "frames": 6, "duration": 140},
+    {"row": 8, "name": "review",         "frames": 6, "duration": 250},
 ]
+
+# ── Hermes state → sprite row mapping ─────────────────────────────
+
+STATE_TO_ROW = {
+    # Action states
+    "idle":         0,  # idle
+    "typing":       1,  # running-right (busy/working)
+    "listening":    2,  # running-left (attentive)
+    "speaking":     3,  # waving (addressing user)
+    "searching":    1,  # running-right (same as typing — working)
+    "calculating":  7,  # running (heavy work)
+    "fixing":       7,  # running (same as calculating)
+    "success":      4,  # jumping (celebration)
+    "error":        5,  # failed
+    "alert":        6,  # waiting (asking user)
+    "thinking":     6,  # waiting (processing)
+    "sleeping":     0,  # idle (peaceful rest)
+
+    # Emotion states — map to review (affectionate/positive) or nearest
+    "happy":        4,  # jumping
+    "amused":       4,  # jumping
+    "empathetic":   6,  # waiting (gentle)
+    "curious":      8,  # review
+    "confused":     5,  # failed
+    "surprised":    4,  # jumping
+    "embarrassed":  3,  # waving (shy)
+    "confident":    4,  # jumping
+    "annoyed":      5,  # failed
+    "overwhelmed":  6,  # waiting
+    "determined":   7,  # running
+    "affectionate": 8,  # review
+
+    # Legacy e-code emotions
+    "e1": 4, "e2": 4, "e3": 6, "e4": 8,
+    "e5": 5, "e6": 4, "e7": 3, "e8": 4,
+    "e9": 5, "e10": 6, "e11": 7, "e12": 8,
+}
 
 EMOTION_NAMES = {
     "e1": "happy", "e2": "amused", "e3": "empathetic", "e4": "curious",
@@ -36,9 +91,16 @@ EMOTION_NAMES = {
     "e9": "annoyed", "e10": "overwhelmed", "e11": "determined", "e12": "affectionate",
 }
 
+STATES = [
+    "idle", "listening", "speaking", "thinking",
+    "typing", "searching", "calculating", "fixing",
+    "success", "error", "alert", "sleeping",
+]
+
 EMOTIONS = list(EMOTION_NAMES.keys())
 
-# Tool → action state mapping
+# ── Tool → state mapping (kept for API compatibility) ────────────
+
 TOOL_STATES = {
     "read_file": "typing", "write_file": "typing", "patch": "typing",
     "search_files": "typing", "file_read": "typing", "file_write": "typing",
@@ -83,14 +145,9 @@ EMOTION_KEYWORDS = [
 ]
 
 
-# ── Video cache ──────────────────────────────────────────────────
-
-_cached_video_state = None
-_cached_video_path = None
-
+# ── State helpers ────────────────────────────────────────────────
 
 def _read_state() -> dict:
-    """Read current state from the shared state file."""
     try:
         if STATE_FILE.exists():
             data = json.loads(STATE_FILE.read_text())
@@ -101,20 +158,28 @@ def _read_state() -> dict:
 
 
 def _write_state(state: str = None, emotion: str = None):
-    """Write state to the shared file."""
-    global _cached_video_state
     current = _read_state()
     if state is not None:
         current["state"] = state
-        current["emotion"] = None  # action clears emotion
+        current["emotion"] = None
     if emotion is not None:
         current["emotion"] = emotion
     current["updated_at"] = time.time()
-    _cached_video_state = None  # force video re-pick
     try:
         STATE_FILE.write_text(json.dumps(current))
     except Exception:
         pass
+
+
+def _detect_emotion(text: str) -> str:
+    if not text:
+        return "e1"
+    lower = text.lower()
+    for keywords, emotion in EMOTION_KEYWORDS:
+        for kw in keywords:
+            if kw in lower:
+                return emotion
+    return "e1"
 
 
 def _get_tool_state(fn: str) -> str:
@@ -136,69 +201,24 @@ def _get_tool_state(fn: str) -> str:
     return "typing"
 
 
-def _detect_emotion(text: str) -> str:
-    if not text:
-        return "e1"
-    lower = text.lower()
-    for keywords, emotion in EMOTION_KEYWORDS:
-        for kw in keywords:
-            if kw in lower:
-                return emotion
-    return "e1"
-
-
-def _find_video(state_name: str):
-    global _cached_video_state, _cached_video_path
-
-    if not VIDEOS_DIR.exists():
-        return None
-
-    if (_cached_video_state == state_name and _cached_video_path
-            and os.path.exists(_cached_video_path)):
-        return _cached_video_path
-
-    files = os.listdir(VIDEOS_DIR)
-    candidates = []
-
-    for f in files:
-        ext = os.path.splitext(f)[1].lower()
-        if ext not in (".mp4", ".webm"):
-            continue
-        base = os.path.splitext(f)[0]
-        if base == state_name or base.startswith(state_name + "-"):
-            candidates.append(str(VIDEOS_DIR / f))
-
-    # Fallback: numbered file for action states
-    if not candidates and state_name in STATES:
-        idx = STATES.index(state_name)
-        num = str(idx + 1)
-        for f in files:
-            ext = os.path.splitext(f)[1].lower()
-            if ext not in (".mp4", ".webm"):
-                continue
-            base = os.path.splitext(f)[0]
-            if base == num or base.startswith(num + "-"):
-                candidates.append(str(VIDEOS_DIR / f))
-
-    if not candidates:
-        return None
-
-    chosen = random.choice(candidates)
-    _cached_video_state = state_name
-    _cached_video_path = chosen
-    return chosen
+def _get_row_for_state(state: str, emotion: str = None) -> dict:
+    """Get the atlas row info for the current display state."""
+    display = emotion or state
+    row_idx = STATE_TO_ROW.get(display, 0)
+    return ATLAS_ROWS[row_idx]
 
 
 # ── Routes ───────────────────────────────────────────────────────
 
 @router.get("/status")
 async def get_status():
-    """Current state — reads from shared state file."""
+    """Current state with spritesheet row info."""
     data = _read_state()
     state = data.get("state", "idle")
     emotion = data.get("emotion")
     display = emotion or state
-    video = _find_video(display)
+
+    row_info = _get_row_for_state(state, emotion)
 
     return {
         "state": state,
@@ -206,8 +226,40 @@ async def get_status():
         "emotion_name": EMOTION_NAMES.get(emotion) if emotion else None,
         "display": display,
         "display_label": EMOTION_NAMES.get(display, display),
-        "video": f"/api/plugins/waifu-sprites/video/{os.path.basename(video)}" if video else None,
+        "row": row_info["row"],
+        "row_name": row_info["name"],
+        "frames": row_info["frames"],
+        "frame_duration": row_info["duration"],
     }
+
+
+@router.get("/atlas")
+async def get_atlas():
+    """Full atlas definition for the frontend sprite animator."""
+    return {
+        "atlas": {
+            "width": ATLAS_WIDTH,
+            "height": ATLAS_HEIGHT,
+            "cell_width": CELL_WIDTH,
+            "cell_height": CELL_HEIGHT,
+            "cols": COLS,
+            "rows": ROWS,
+        },
+        "states": ATLAS_ROWS,
+        "spritesheet": "/api/plugins/waifu-sprites/spritesheet",
+    }
+
+
+@router.get("/spritesheet")
+async def serve_spritesheet():
+    """Serve the spritesheet.webp file."""
+    if not SPRITESHEET.exists():
+        raise HTTPException(404, "Spritesheet not found. Place spritesheet.webp in assets/")
+    return FileResponse(
+        str(SPRITESHEET),
+        media_type="image/webp",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.post("/state")
@@ -259,33 +311,11 @@ async def detect_emotion(body: dict):
     return {"ok": True, "emotion": emotion, "label": EMOTION_NAMES.get(emotion)}
 
 
-@router.get("/video/{filename}")
-async def serve_video(filename: str):
-    """Serve a video file."""
-    clean = os.path.basename(filename)
-    filepath = VIDEOS_DIR / clean
-    if not filepath.exists():
-        raise HTTPException(404, "Video not found")
-    return FileResponse(
-        str(filepath),
-        media_type="video/mp4",
-        headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"},
-    )
-
-
 @router.get("/states")
 async def list_states():
-    """List all available states and their videos."""
-    result = {"actions": {}, "emotions": {}}
-    if VIDEOS_DIR.exists():
-        files = os.listdir(VIDEOS_DIR)
-        for st in STATES:
-            idx = STATES.index(st) + 1
-            vids = [f for f in files if f.startswith(f"{idx}.") or f.startswith(f"{idx}-")]
-            if vids:
-                result["actions"][st] = vids
-        for emo in EMOTIONS:
-            vids = [f for f in files if f.startswith(f"{emo}.") or f.startswith(f"{emo}-")]
-            if vids:
-                result["emotions"][emo] = {"name": EMOTION_NAMES[emo], "videos": vids}
-    return result
+    """List all available states and their atlas mapping."""
+    return {
+        "actions": {s: STATE_TO_ROW.get(s, 0) for s in STATES},
+        "emotions": {e: {"name": EMOTION_NAMES[e], "row": STATE_TO_ROW.get(e, 0)} for e in EMOTIONS},
+        "atlas": ATLAS_ROWS,
+    }
