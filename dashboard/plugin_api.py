@@ -1,13 +1,8 @@
 """
 waifu-sprites dashboard plugin — sprite backend.
 
-Reads state from shared state file (~/.hermes/plugins/waifu-sprites/state.json).
-Agent writes to this file via __init__.py hooks.
-Serves spritesheet from the plugin's assets/ directory.
-
-Spritesheet format:
-  - spritesheet.webp: 1536x1872 atlas, 8 cols x 9 rows, 192x208 per cell
-  - Each row is an animation state, each column is a frame
+Reads state from shared state file. Manages multiple installed pets.
+Each pet is a folder in pets/ with pet.json + spritesheet.webp.
 """
 
 import os
@@ -22,21 +17,21 @@ router = APIRouter()
 # ── Paths ────────────────────────────────────────────────────────
 
 PLUGIN_DIR = Path(__file__).parent.parent
-ASSETS_DIR = PLUGIN_DIR / "assets"
-SPRITESHEET = ASSETS_DIR / "spritesheet.webp"
+PETS_DIR = PLUGIN_DIR / "pets"
 STATE_FILE = PLUGIN_DIR / "state.json"
 
-# ── Sprite atlas definition ───────────────────────────────────────
+# ── Sprite atlas (fixed for all pets) ────────────────────────────
 
-ATLAS_WIDTH = 1536
-ATLAS_HEIGHT = 1872
-CELL_WIDTH = 192   # 1536 / 8
-CELL_HEIGHT = 208  # 1872 / 9
-COLS = 8
-ROWS = 9
+ATLAS = {
+    "width": 1536,
+    "height": 1872,
+    "cell_width": 192,
+    "cell_height": 208,
+    "cols": 8,
+    "rows": 9,
+}
 
-# Row definitions: row index, name, frame count, frame durations (ms)
-ATLAS_ROWS = [
+ROWS = [
     {"row": 0, "name": "idle",          "frames": 6, "duration": 200},
     {"row": 1, "name": "running-right",  "frames": 8, "duration": 120},
     {"row": 2, "name": "running-left",   "frames": 8, "duration": 120},
@@ -48,38 +43,15 @@ ATLAS_ROWS = [
     {"row": 8, "name": "review",         "frames": 6, "duration": 250},
 ]
 
-# ── Hermes state → sprite row mapping ─────────────────────────────
+# ── State → row mapping ─────────────────────────────────────────
 
 STATE_TO_ROW = {
-    # Action states
-    "idle":         0,  # idle
-    "typing":       1,  # running-right (busy/working)
-    "listening":    2,  # running-left (attentive)
-    "speaking":     3,  # waving (addressing user)
-    "searching":    1,  # running-right (same as typing — working)
-    "calculating":  7,  # running (heavy work)
-    "fixing":       7,  # running (same as calculating)
-    "success":      4,  # jumping (celebration)
-    "error":        5,  # failed
-    "alert":        6,  # waiting (asking user)
-    "thinking":     6,  # waiting (processing)
-    "sleeping":     0,  # idle (peaceful rest)
-
-    # Emotion states — map to review (affectionate/positive) or nearest
-    "happy":        4,  # jumping
-    "amused":       4,  # jumping
-    "empathetic":   6,  # waiting (gentle)
-    "curious":      8,  # review
-    "confused":     5,  # failed
-    "surprised":    4,  # jumping
-    "embarrassed":  3,  # waving (shy)
-    "confident":    4,  # jumping
-    "annoyed":      5,  # failed
-    "overwhelmed":  6,  # waiting
-    "determined":   7,  # running
-    "affectionate": 8,  # review
-
-    # Legacy e-code emotions
+    "idle": 0, "typing": 1, "listening": 2, "speaking": 3,
+    "searching": 1, "calculating": 7, "fixing": 7,
+    "success": 4, "error": 5, "alert": 6, "thinking": 6, "sleeping": 0,
+    "happy": 4, "amused": 4, "empathetic": 6, "curious": 8,
+    "confused": 5, "surprised": 4, "embarrassed": 3, "confident": 4,
+    "annoyed": 5, "overwhelmed": 6, "determined": 7, "affectionate": 8,
     "e1": 4, "e2": 4, "e3": 6, "e4": 8,
     "e5": 5, "e6": 4, "e7": 3, "e8": 4,
     "e9": 5, "e10": 6, "e11": 7, "e12": 8,
@@ -92,57 +64,99 @@ EMOTION_NAMES = {
 }
 
 STATES = [
-    "idle", "listening", "speaking", "thinking",
-    "typing", "searching", "calculating", "fixing",
-    "success", "error", "alert", "sleeping",
+    "idle", "listening", "speaking", "thinking", "typing", "searching",
+    "calculating", "fixing", "success", "error", "alert", "sleeping",
 ]
-
 EMOTIONS = list(EMOTION_NAMES.keys())
 
-# ── Tool → state mapping (kept for API compatibility) ────────────
+# ── Tool → state mapping ─────────────────────────────────────────
 
 TOOL_STATES = {
     "read_file": "typing", "write_file": "typing", "patch": "typing",
-    "search_files": "typing", "file_read": "typing", "file_write": "typing",
-    "web_search": "searching", "web_extract": "searching",
+    "search_files": "typing", "web_search": "searching", "web_extract": "searching",
     "session_search": "searching", "browser_navigate": "searching",
     "browser_snapshot": "searching", "browser_vision": "searching",
     "browser_get_images": "searching", "browser_back": "searching",
     "browser_click": "typing", "browser_type": "typing",
     "browser_press": "typing", "browser_scroll": "typing",
-    "execute_code": "calculating", "code_execution_tool": "calculating",
-    "browser_console": "calculating",
-    "terminal": "fixing", "terminal_tool": "fixing", "process": "fixing",
+    "execute_code": "calculating", "browser_console": "calculating",
+    "terminal": "fixing", "process": "fixing",
     "delegate_task": "thinking", "todo": "thinking", "memory": "thinking",
-    "cronjob": "thinking", "skills_list": "thinking", "skill_view": "thinking",
-    "skill_manage": "thinking",
+    "cronjob": "thinking", "skill_view": "thinking", "skill_manage": "thinking",
     "clarify": "alert",
     "text_to_speech": "speaking", "send_message": "speaking",
 }
 
 EMOTION_KEYWORDS = [
-    (["love", "thank you", "you're sweet", "cutie", "heart", "glad i could help",
-      "happy to help", "you're welcome", "\u2661", "\u2764"], "e12"),
-    (["sorry", "apolog", "unfortunately", "my bad", "oops", "i was wrong",
-      "i made an error", "couldn't find", "i can't", "i'm afraid"], "e7"),
-    (["this is a lot", "so many", "overwhelm", "massive", "complex"], "e10"),
-    (["wow", "whoa", "amazing!", "incredible!", "no way",
-      "fascinating", "that's wild", "didn't expect"], "e6"),
-    (["hmm", "confus", "unclear", "ambiguous", "what do you mean",
-      "not sure what", "i'm not sure", "actually..."], "e5"),
-    (["again", "repeatedly", "as i said", "i already", "once more"], "e9"),
-    (["what is", "how does", "tell me more", "interesting",
-      "i wonder", "curious", "what if"], "e4"),
-    (["found it", "here's", "let me show", "perfect", "exactly",
-      "done!", "easy", "no problem", "absolutely", "definitely"], "e8"),
-    (["let me", "i'll", "going to", "here's how", "step by step",
-      "first,", "working on"], "e11"),
-    (["haha", "lol", "lmao", "funny", "joke", "silly", "that's great"], "e2"),
-    (["i understand", "that's tough", "i'm sorry to hear", "it's okay",
-      "don't worry", "take your time", "hang in there"], "e3"),
-    (["great", "good", "nice", "awesome", "wonderful", "yes!",
-      "sounds good", "let's go", "exciting"], "e1"),
+    (["love", "thank you", "cutie", "heart", "\u2661", "\u2764"], "e12"),
+    (["sorry", "apolog", "unfortunately", "my bad", "oops"], "e7"),
+    (["this is a lot", "so many", "overwhelm", "massive"], "e10"),
+    (["wow", "amazing!", "incredible!", "fascinating"], "e6"),
+    (["hmm", "confus", "unclear", "not sure"], "e5"),
+    (["again", "as i said", "i already", "repeatedly"], "e9"),
+    (["what is", "how does", "curious", "interesting", "tell me more"], "e4"),
+    (["found it", "perfect", "exactly", "done!", "no problem"], "e8"),
+    (["let me", "i'll", "going to", "step by step", "working on"], "e11"),
+    (["haha", "lol", "funny", "silly"], "e2"),
+    (["i understand", "that's tough", "it's okay", "don't worry"], "e3"),
+    (["great", "good", "nice", "awesome", "yes!", "exciting"], "e1"),
 ]
+
+
+# ── Pet management ───────────────────────────────────────────────
+
+def _scan_pets() -> list:
+    """Scan pets/ directory and return list of pet metadata."""
+    pets = []
+    if not PETS_DIR.exists():
+        return pets
+    for entry in sorted(PETS_DIR.iterdir()):
+        if not entry.is_dir():
+            continue
+        manifest = entry / "pet.json"
+        sheet = entry / "spritesheet.webp"
+        if not manifest.exists() or not sheet.exists():
+            continue
+        try:
+            data = json.loads(manifest.read_text())
+            data["_dir"] = entry.name
+            data["_spritesheet"] = str(sheet)
+            data["_size"] = sheet.stat().st_size
+            pets.append(data)
+        except Exception:
+            continue
+    return pets
+
+
+def _get_active_pet_id() -> str:
+    """Get the currently active pet ID from state."""
+    data = _read_state()
+    return data.get("active_pet", "")
+
+
+def _get_active_pet() -> dict | None:
+    """Get the active pet's metadata."""
+    pet_id = _get_active_pet_id()
+    if pet_id:
+        for pet in _scan_pets():
+            if pet.get("id") == pet_id or pet.get("_dir") == pet_id:
+                return pet
+    # Default to first available pet
+    pets = _scan_pets()
+    if pets:
+        _set_active_pet(pets[0].get("id", pets[0].get("_dir", "")))
+        return pets[0]
+    return None
+
+
+def _set_active_pet(pet_id: str):
+    """Set the active pet."""
+    data = _read_state()
+    data["active_pet"] = pet_id
+    try:
+        STATE_FILE.write_text(json.dumps(data))
+    except Exception:
+        pass
 
 
 # ── State helpers ────────────────────────────────────────────────
@@ -154,10 +168,10 @@ def _read_state() -> dict:
             return data if isinstance(data, dict) else {}
     except Exception:
         pass
-    return {"state": "idle", "emotion": None, "updated_at": 0}
+    return {"state": "idle", "emotion": None, "updated_at": 0, "active_pet": ""}
 
 
-def _write_state(state: str = None, emotion: str = None):
+def _write_state(state=None, emotion=None):
     current = _read_state()
     if state is not None:
         current["state"] = state
@@ -189,36 +203,66 @@ def _get_tool_state(fn: str) -> str:
         return TOOL_STATES[fn]
     lo = fn.lower()
     for kws, st in [
-        (["search", "find", "browse", "navigate", "web"], "searching"),
-        (["file", "read", "write", "patch", "edit"], "typing"),
-        (["code", "exec", "run", "math", "calcul"], "calculating"),
-        (["terminal", "shell", "build", "install", "git"], "fixing"),
-        (["delegate", "skill", "todo", "memory", "cron"], "thinking"),
-        (["speak", "voice", "say"], "speaking"),
+        (["search", "find", "browse", "web"], "searching"),
+        (["file", "read", "write", "patch"], "typing"),
+        (["code", "exec", "run", "math"], "calculating"),
+        (["terminal", "shell", "build", "git"], "fixing"),
+        (["delegate", "skill", "todo", "memory"], "thinking"),
+        (["speak", "voice"], "speaking"),
     ]:
         if any(k in lo for k in kws):
             return st
     return "typing"
 
 
-def _get_row_for_state(state: str, emotion: str = None) -> dict:
-    """Get the atlas row info for the current display state."""
+def _get_row_info(state: str, emotion: str = None) -> dict:
     display = emotion or state
     row_idx = STATE_TO_ROW.get(display, 0)
-    return ATLAS_ROWS[row_idx]
+    return ROWS[row_idx]
 
 
 # ── Routes ───────────────────────────────────────────────────────
 
+@router.get("/pets")
+async def list_pets():
+    """List all installed pets."""
+    pets = _scan_pets()
+    active_id = _get_active_pet_id()
+    result = []
+    for pet in pets:
+        pid = pet.get("id", pet.get("_dir", ""))
+        result.append({
+            "id": pid,
+            "displayName": pet.get("displayName", pid),
+            "description": pet.get("description", ""),
+            "active": pid == active_id,
+        })
+    return {"pets": result, "active": active_id}
+
+
+@router.post("/pets/active")
+async def set_active(body: dict):
+    """Switch the active pet."""
+    pet_id = body.get("id", "")
+    if not pet_id:
+        raise HTTPException(400, "Missing pet id")
+    # Verify pet exists
+    for pet in _scan_pets():
+        if pet.get("id") == pet_id or pet.get("_dir") == pet_id:
+            _set_active_pet(pet_id)
+            return {"ok": True, "active": pet_id}
+    raise HTTPException(404, f"Pet not found: {pet_id}")
+
+
 @router.get("/status")
 async def get_status():
-    """Current state with spritesheet row info."""
+    """Current state with active pet info."""
     data = _read_state()
     state = data.get("state", "idle")
     emotion = data.get("emotion")
     display = emotion or state
-
-    row_info = _get_row_for_state(state, emotion)
+    row_info = _get_row_info(state, emotion)
+    pet = _get_active_pet()
 
     return {
         "state": state,
@@ -230,33 +274,41 @@ async def get_status():
         "row_name": row_info["name"],
         "frames": row_info["frames"],
         "frame_duration": row_info["duration"],
+        "pet": {
+            "id": pet.get("id", "") if pet else "",
+            "displayName": pet.get("displayName", "No pet") if pet else "No pet",
+            "description": pet.get("description", "") if pet else "",
+        } if pet else None,
     }
 
 
 @router.get("/atlas")
 async def get_atlas():
-    """Full atlas definition for the frontend sprite animator."""
+    """Atlas definition + active pet spritesheet URL."""
+    pet = _get_active_pet()
     return {
-        "atlas": {
-            "width": ATLAS_WIDTH,
-            "height": ATLAS_HEIGHT,
-            "cell_width": CELL_WIDTH,
-            "cell_height": CELL_HEIGHT,
-            "cols": COLS,
-            "rows": ROWS,
-        },
-        "states": ATLAS_ROWS,
-        "spritesheet": "/api/plugins/waifu-sprites/spritesheet",
+        "atlas": ATLAS,
+        "states": ROWS,
+        "spritesheet": f"/api/plugins/waifu-sprites/spritesheet?v={pet.get('id', '')}" if pet else None,
+        "pet": {
+            "id": pet.get("id", ""),
+            "displayName": pet.get("displayName", ""),
+            "description": pet.get("description", ""),
+        } if pet else None,
     }
 
 
 @router.get("/spritesheet")
 async def serve_spritesheet():
-    """Serve the spritesheet.webp file."""
-    if not SPRITESHEET.exists():
-        raise HTTPException(404, "Spritesheet not found. Place spritesheet.webp in assets/")
+    """Serve the active pet's spritesheet."""
+    pet = _get_active_pet()
+    if not pet:
+        raise HTTPException(404, "No pet installed")
+    sheet_path = Path(pet["_spritesheet"])
+    if not sheet_path.exists():
+        raise HTTPException(404, "Spritesheet not found")
     return FileResponse(
-        str(SPRITESHEET),
+        str(sheet_path),
         media_type="image/webp",
         headers={"Cache-Control": "public, max-age=3600"},
     )
@@ -267,19 +319,15 @@ async def set_state(body: dict):
     """Set action state or emotion."""
     state = body.get("state", "")
     emotion = body.get("emotion")
-
     if emotion and emotion in EMOTIONS:
         _write_state(emotion=emotion)
         return {"ok": True, "emotion": emotion}
-
     if state in EMOTIONS:
         _write_state(emotion=state)
         return {"ok": True, "emotion": state}
-
     if state in STATES:
         _write_state(state=state)
         return {"ok": True, "state": state}
-
     raise HTTPException(400, f"Invalid state: {state}")
 
 
@@ -288,7 +336,6 @@ async def on_tool(body: dict):
     """Auto-map tool name to action state."""
     fn = body.get("function_name", "")
     phase = body.get("phase", "start")
-
     if phase == "start":
         _write_state(state=_get_tool_state(fn))
     elif phase == "complete":
@@ -297,7 +344,6 @@ async def on_tool(body: dict):
         _write_state(state="error" if is_err else "idle")
     elif phase == "error":
         _write_state(state="error")
-
     data = _read_state()
     return {"ok": True, "state": data.get("state"), "emotion": data.get("emotion")}
 
@@ -317,5 +363,5 @@ async def list_states():
     return {
         "actions": {s: STATE_TO_ROW.get(s, 0) for s in STATES},
         "emotions": {e: {"name": EMOTION_NAMES[e], "row": STATE_TO_ROW.get(e, 0)} for e in EMOTIONS},
-        "atlas": ATLAS_ROWS,
+        "atlas": ROWS,
     }
