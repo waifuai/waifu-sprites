@@ -1,238 +1,202 @@
 # 🐾 waifu-sprites
 
-**A lightweight web-based display server + TTS for local AI Agents.**
+**Animated sprite overlay for [hermes-agent](https://github.com/nousresearch/hermes-agent).**
 
-`waifu-sprites` is a browser-based companion UI that acts as the "Face" for headless, agentic LLM orchestrators (like `hermes-agent`).
+A dashboard plugin that displays an animated waifu sprite that reacts to your agent's state in real-time — idle, typing, thinking, calculating, and more.
 
-**Single source of truth** — sprite server, TTS server, agent hooks, and integration code all live here. Hermes-agent symlinks to `src/` so edits take effect immediately.
+Drop in pet packages from the [waifu sprite marketplace](https://codex-pet-share.pages.dev), switch between them from the sidebar dropdown.
 
 ---
 
-## ⚡ Why this exists
-Modern AI agents are incredibly smart (they can write files, execute Python, and search the web autonomously), but their user interfaces are often underwhelming:
-- **Boring** command-line terminal windows.
-- **Bloated** 500MB+ Web UI wrappers that drain your laptop's battery.
-- **Complex** 3D VTuber setups that are fragile and resource-heavy.
+## ✨ Features
 
-`waifu-sprites` fixes this by decoupling the **Brain** (your Python/WSL2 Agent) from the **Face** (this web server).
-
-* **CPU/RAM Usage:** Minimal (browser does the work).
-* **Launch Time:** Instant.
-* **Moddability:** Edit HTML/CSS/JS, refresh browser, done.
-* **MP4 Support:** Native — just drop `.mp4` files in `videos/`.
+- **Real-time state tracking** — sprite animation changes based on agent activity (idle, typing, thinking, speaking, etc.)
+- **Multi-pet support** — download pet packages, drop them in `pets/`, switch from the UI
+- **Waifu sprite format** — standard 1536×1872 WebP spritesheets (8 cols × 9 rows, 192×208 per cell)
+- **Dashboard plugin** — integrates into the hermes dashboard as an overlay + sidebar
+- **Zero dependencies** — pure Python backend (FastAPI), vanilla JS frontend
+- **Pet marketplace** — browse and download pets from [codex-pet-share.pages.dev](https://codex-pet-share.pages.dev)
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│  waifu-sprites (Windows native)                 │
-│                                                 │
-│  server.js (:8000)        tts_server.py (:8001) │
-│  Sprite display server    Kokoro TTS server     │
-│  ├─ POST /state           ├─ POST /tts          │
-│  ├─ GET /current_state    ├─ POST /clear         │
-│  ├─ GET /tts/status ──────┤ GET /tts/status      │
-│  ├─ POST /tts/skip ───────┤ POST /tts/skip       │
-│  └─ POST /tts/clear ──────┘                      │
-│                                                 │
-│  index.html (browser)                           │
-│  ├─ Sprite display + manual browse              │
-│  └─ TTS controls (⏮ ⏹ ⏭ chunk display)         │
-└─────────────────────────────────────────────────┘
-         ▲                    ▲
-         │ HTTP :8000         │ file queue
-         │                    │
-┌────────┴────────────────────┴────────┐
-│  WSL2 / hermes-agent                 │
-│                                      │
-│  waifu_hook.py (symlink → src/)      │
-│  ├─ set_waifu_state() → :8000        │
-│  ├─ on_agent_reply() → queue file    │
-│  └─ emotion detection, TTS chunking  │
-│                                      │
-│  waifu.py (symlink → src/)           │
-│  └─ Monkey-patches HermesCLI         │
-└──────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  hermes-agent (WSL2 / Linux)                 │
+│                                              │
+│  __init__.py                                 │
+│  ├─ on_agent_start()  → state.json           │
+│  ├─ on_agent_end()    → state.json           │
+│  └─ state detection (tool calls, replies)    │
+└──────────────┬───────────────────────────────┘
+               │ writes state.json
+               ▼
+┌──────────────────────────────────────────────┐
+│  waifu-sprites plugin                        │
+│                                              │
+│  dashboard/plugin_api.py   (FastAPI backend) │
+│  ├─ GET /status            current state     │
+│  ├─ GET /atlas             sprite metadata   │
+│  ├─ GET /spritesheet       WebP image        │
+│  ├─ GET /pets              list all pets     │
+│  └─ POST /switch           change active pet │
+│                                              │
+│  dashboard/dist/index.js   (React frontend)  │
+│  ├─ SpriteAnimator          CSS animation    │
+│  └─ PetSelector            dropdown switcher │
+│                                              │
+│  pets/                     pet packages      │
+│  ├─ lumina/                                     │
+│  ├─ linnea/                                     │
+│  └─ ...                                         │
+└──────────────────────────────────────────────┘
 ```
 
-- **server.js** (Node.js, port 8000) — serves the sprite UI and proxies TTS control requests
-- **tts_server.py** (Python/Flask, port 8001) — Kokoro TTS with chunk queuing and skip support
-- **src/waifu_hook.py** — agent-side hooks (visual states, emotion detection, TTS chunking)
-- **src/waifu.py** — monkey-patches hermes-agent CLI to inject hooks automatically
-
-WSL2 can't reach Windows localhost, so agent → TTS uses a **file queue** (`~/.waifu-voice-queue.txt`). The TTS server polls it. Skip controls work over HTTP because browser + server.js both run on Windows.
+The plugin runs inside the hermes dashboard (port 9119). Agent hooks write `state.json`, the backend reads it and serves sprite data, the frontend animates using CSS `background-position` stepping.
 
 ---
 
-## 🎨 Character System
-`waifu-sprites` supports multiple characters via the `assets/` folder. Auto-discovers all sets on startup.
+## 🎭 State Mapping
 
-### Directory Mode
-Individual PNG frames per state:
+12 agent states mapped to 9 sprite animation rows:
 
-```
-assets/
-├── waifu/
-│   ├── 1.png   # idle
-│   ├── 2.png   # listening
-│   ├── 3.png   # speaking
-│   ├── ...
-│   ├── e1.png  # emotion: idle
-│   └── ...
-```
+| Row | Animation      | Agent States                    |
+|-----|---------------|---------------------------------|
+| 0   | idle          | idle                            |
+| 1   | running-right | typing, searching               |
+| 2   | running-left  | listening                       |
+| 3   | waving        | speaking                        |
+| 4   | jumping       | success, confident, happy       |
+| 5   | failed        | error, confused, annoyed        |
+| 6   | waiting       | thinking, alert, waiting        |
+| 7   | running       | calculating, fixing, determined |
+| 8   | review        | affectionate, curious           |
 
-### Spritesheet Mode
-Single PNG with a 4x3 grid of frames. Automatically cropped via CSS `background-position` to show the correct frame per state.
+---
 
-```
-assets/
-├── ori.png              # spritesheet (4x3 grid)
-└── hologram-simple.png  # spritesheet (4x3 grid)
-```
+## 📦 Pet Packages
 
-### MP4 Mode
-Drop MP4 files in `videos/` for animated sprites — takes priority over PNGs when present:
+Each pet is a directory in `pets/` containing:
 
 ```
-videos/
-├── idle.mp4
-├── speaking.mp4
-├── thinking.mp4
+pets/
+├── lumina/
+│   ├── pet.json           # metadata (id, displayName, description)
+│   └── spritesheet.webp   # 1536×1872 spritesheet (8×9 grid)
+├── linnea/
+│   ├── pet.json
+│   └── spritesheet.webp
 └── ...
 ```
 
-Or use numbered files: `1.mp4`, `2.mp4`, etc. (1=idle, 2=listening, ...)
+### Installing Pets
 
-Browsers decode H.264 MP4 natively with hardware acceleration. Much smaller than GIFs.
+1. Download a `.codex-pet.zip` from the [marketplace](https://codex-pet-share.pages.dev)
+2. Extract to `pets/<pet-id>/`
+3. Rescan plugins: `curl http://127.0.0.1:9119/api/dashboard/plugins/rescan`
+4. Select from the sidebar dropdown
 
-### Waifu Selector
-Dropdown in the UI to switch between sets. Selection is saved to `localStorage` and persists across reloads.
-
----
-
-## 🎮 Manual Browse Mode
-Click the ⏸ button to pause auto-follow and browse states manually with the buttons. Click ▶ to resume following the server. State label shows `[manual]` when in browse mode.
-
----
-
-## 🔊 TTS Controls
-When TTS is active, a control bar appears below the emotion buttons:
-
-- **⏮** Skip back — replay previous chunk
-- **⏹** Stop — clear queue and stop audio
-- **⏭** Skip forward — skip to next chunk
-- **2/5** — shows current chunk / total chunks in the batch
-
-The TTS bar auto-hides when idle. Polls status every 500ms.
-
----
-
-## 🎭 States
-12 agent states, mapped to frame numbers:
-
-| # | State | # | State |
-|---|-------|---|-------|
-| 1 | idle | 7 | calculating |
-| 2 | listening | 8 | fixing |
-| 3 | speaking | 9 | success |
-| 4 | thinking | 10 | error |
-| 5 | typing | 11 | alert |
-| 6 | searching | 12 | sleeping |
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- [Node.js](https://nodejs.org/) (any recent version)
-- [Python 3](https://www.python.org/) (for TTS server)
-- `pip install flask sounddevice numpy onnxruntime kokoro-onnx` (for TTS)
-
-### Run
-
-**Start both servers:**
+Or use the bulk install script:
 ```bash
 cd waifu-sprites
-node server.js          # Sprite display on :8000
-python tts_server.py    # TTS on :8001
+python3 -c "
+import zipfile, json, os
+for zf in os.listdir('.'):
+    if zf.endswith('.codex-pet.zip'):
+        with zipfile.ZipFile(zf) as z:
+            meta = json.loads(z.read([n for n in z.namelist() if n.endswith('pet.json')][0]))
+            z.extractall(f'pets/{meta[\"id\"]}')
+"
 ```
-
-Or double-click `voice.bat` for TTS, and run `node server.js` separately.
-
-**Open** http://localhost:8000
-
-### Hermes Agent Setup (WSL2)
-
-Symlink from hermes-agent to waifu-sprites so edits take effect immediately:
-```bash
-cd ~/.hermes/hermes-agent
-ln -sf /path/to/waifu-sprites/src/waifu_hook.py waifu_hook.py
-ln -sf /path/to/waifu-sprites/src/waifu.py waifu.py
-```
-
-Then launch with:
-```bash
-cd ~/.hermes/hermes-agent && python3 waifu.py
-```
-
-### Connect Your Backend (Python/Node/Bash)
-
-The simplest way — just POST a JSON state to the server:
-
-**From any terminal:**
-```bash
-curl -X POST http://127.0.0.1:8000/state \
-     -H "Content-Type: application/json" \
-     -d '{"state": "thinking"}'
-```
-
-**From Python:**
-```python
-import requests
-
-def update_waifu(state):
-    requests.post("http://127.0.0.1:8000/state", json={"state": state})
-
-update_waifu("typing")
-```
-
-### API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/state` | POST | Set current state `{"state": "speaking"}` |
-| `/current_state` | GET | Get current state + available sets |
-| `/asset?set=waifu&state=idle` | GET | Serve asset for state |
-| `/sets` | GET | List discovered waifu sets |
-| `/assets/*` | GET | Direct asset file access |
-| `/videos/*` | GET | Direct video file access |
-| `/tts/status` | GET | TTS queue state (chunk info, playing status) |
-| `/tts/skip` | POST | Skip TTS `{"direction": "forward"}` or `{"direction": "back"}` |
-| `/tts/clear` | POST | Clear TTS queue and stop audio |
 
 ---
 
-## 📁 File Structure
+## 🚀 Installation
+
+### As a Hermes Plugin
+
+```bash
+cd ~/.hermes/plugins
+git clone <this-repo> waifu-sprites
+```
+
+Or symlink:
+```bash
+ln -sf /path/to/waifu-sprites ~/.hermes/plugins/waifu-sprites
+```
+
+Then rescan:
+```bash
+curl http://127.0.0.1:9119/api/dashboard/plugins/rescan
+```
+
+### Prerequisites
+
+- [hermes-agent](https://github.com/nousresearch/hermes-agent) running
+- Python 3.8+ with `fastapi` and `uvicorn` (usually already installed with hermes)
+
+---
+
+## 📁 Project Structure
 
 ```
 waifu-sprites/
-├── server.js           # Sprite display server (:8000)
-├── tts_server.py       # Kokoro TTS server (:8001)
-├── index.html          # Browser UI (sprites + TTS controls)
-├── send-tts.ps1        # PowerShell TTS helper
-├── src/
-│   ├── waifu_hook.py   # Agent hooks (visual states, emotion, TTS)
-│   └── waifu.py        # Hermes CLI monkey-patch wrapper
-├── assets/             # Sprite PNGs and spritesheets
-└── videos/             # MP4 animated sprites (gitignored)
+├── __init__.py              # Agent hooks (writes state.json)
+├── state.json               # Shared state file
+├── config.json              # Plugin configuration
+├── plugin.yaml              # Hermes plugin descriptor
+├── pets/                    # Pet packages
+│   ├── lumina/
+│   ├── linnea/
+│   └── ...
+└── dashboard/
+    ├── manifest.json        # Plugin manifest (slots, routes)
+    ├── plugin_api.py        # FastAPI backend
+    └── dist/
+        ├── index.js         # React frontend (sprite + pet selector)
+        └── style.css        # Sprite container + UI styles
 ```
 
+---
+
 ## 🛠️ Stack
-- **Sprite Server:** Node.js built-in `http` module (zero npm dependencies)
-- **TTS Server:** Python + Flask + Kokoro ONNX
-- **Frontend:** Vanilla HTML/CSS/JS
-- **Video:** Browser-native `<video>` element (H.264/VP8)
-- **Images:** Browser-native `<img>` element (PNG/JPG/SVG)
-- **Spritesheets:** CSS `background-position` cropping (4x3 grid)
+
+- **Backend:** Python + FastAPI (served by hermes dashboard)
+- **Frontend:** Vanilla JS + CSS animations (no build step)
+- **Sprites:** CSS `background-position` stepping on WebP spritesheets
+- **Format:** Waifu sprite spec (1536×1872, 8 cols × 9 rows, 192×208 cells)
+
+---
+
+## 📝 API
+
+All endpoints are prefixed by the plugin route (typically `/api/plugins/waifu-sprites/`).
+
+| Endpoint     | Method | Description                          |
+|-------------|--------|--------------------------------------|
+| `/status`   | GET    | Current state + sprite row/frames    |
+| `/atlas`    | GET    | Spritesheet metadata (cols, rows, cell size) |
+| `/spritesheet` | GET | Serve the active pet's WebP image   |
+| `/pets`     | GET    | List all installed pets              |
+| `/switch`   | POST   | Switch active pet `{"pet_id":"..."}` |
+| `/state`    | POST   | Set state manually `{"state":"idle"}` |
+
+---
+
+## 🎨 Creating Custom Pets
+
+Create a directory in `pets/` with:
+
+1. **`pet.json`** — metadata:
+   ```json
+   {
+     "id": "my-pet",
+     "displayName": "My Pet",
+     "description": "A custom waifu sprite pet"
+   }
+   ```
+
+2. **`spritesheet.webp`** — 1536×1872 image with 8 columns × 9 rows, each cell 192×208 pixels. Rows map to animation states (see table above).
+
+The spritesheet should be in WebP format for optimal size. Each row is a different animation state, each column is a frame in that animation's cycle.
