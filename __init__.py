@@ -123,18 +123,43 @@ def _on_pre_tool_call(*, tool_name: str = "", args: Any = None,
     _write_state(state=state)
 
 
+def _is_tool_error(result: Any) -> bool:
+    """Check if a tool result indicates an actual error.
+
+    Uses structural checks instead of substring matching to avoid false
+    positives from file content that happens to contain words like 'error'.
+    """
+    if result is None:
+        return False
+
+    # Dict result — check for error key (Hermes error convention)
+    if isinstance(result, dict):
+        if "error" in result:
+            return True
+        # Some tools return {"ok": false, ...}
+        if result.get("ok") is False:
+            return True
+        return False
+
+    # String result — check for actual error patterns (prefix/structure only)
+    if isinstance(result, str):
+        stripped = result.strip()
+        # Hermes error strings start with these patterns
+        if stripped.startswith(("Error:", "Error ", "Traceback", "FAILED:")):
+            return True
+        # JSON string that might be an error
+        if stripped.startswith("{") and '"error"' in stripped[:200]:
+            return True
+        return False
+
+    return False
+
+
 def _on_post_tool_call(*, tool_name: str = "", args: Any = None,
                        result: Any = None, task_id: str = "",
                        session_id: str = "", **_):
     """After tool completes — check result for errors."""
-    is_err = False
-    if result:
-        r = str(result).lower()
-        is_err = any(k in r for k in [
-            "error", "failed", "exception", "traceback",
-            "not found", "denied", "forbidden", "timeout",
-        ])
-    _write_state(state="error" if is_err else "idle")
+    _write_state(state="error" if _is_tool_error(result) else "idle")
 
 
 def _on_pre_llm_call(*, task_id: str = "", session_id: str = "", **_):

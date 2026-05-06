@@ -1,6 +1,6 @@
 name: waifu-sprites
-version: 3.0.0
-description: "Video-based AI companion — fluid, expressive video clips driven by agent activity"
+version: 3.1.0
+description: "Video-based AI companion with dashboard — settings, live state, video browser"
 author: "WaifuAI"
 hooks:
   - pre_tool_call

@@ -22,6 +22,36 @@ VIDEOS_DIR = PLUGIN_DIR / "videos"
 DOCS_VIDEOS_DIR = PLUGIN_DIR / "docs" / "videos"
 STATE_FILE = PLUGIN_DIR / "state.json"
 
+CONFIG_FILE = PLUGIN_DIR / "config.json"
+
+DEFAULT_CONFIG = {
+    "overlay_enabled": True,
+    "overlay_size": 320,
+    "poll_interval_ms": 2000,
+}
+
+
+def _read_config() -> dict:
+    """Read config with defaults."""
+    cfg = dict(DEFAULT_CONFIG)
+    try:
+        if CONFIG_FILE.exists():
+            data = json.loads(CONFIG_FILE.read_text())
+            if isinstance(data, dict):
+                cfg.update(data)
+    except Exception:
+        pass
+    return cfg
+
+
+def _write_config(cfg: dict):
+    """Write config to disk."""
+    try:
+        CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+    except Exception:
+        pass
+
+
 # ── State definitions ────────────────────────────────────────────
 
 STATES = [
@@ -302,3 +332,21 @@ async def list_states():
         "actions": {s: STATE_VIDEO_MAP.get(s) for s in STATES},
         "emotions": {e: {"name": EMOTION_NAMES[e], "video": STATE_VIDEO_MAP.get(e)} for e in EMOTIONS},
     }
+
+
+@router.get("/config")
+async def get_config():
+    """Read current plugin config."""
+    return _read_config()
+
+
+@router.post("/config")
+async def update_config(body: dict):
+    """Update plugin config. Merges with existing values."""
+    cfg = _read_config()
+    allowed = set(DEFAULT_CONFIG.keys())
+    for k, v in body.items():
+        if k in allowed:
+            cfg[k] = v
+    _write_config(cfg)
+    return {"ok": True, "config": cfg}

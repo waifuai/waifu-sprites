@@ -2,5 +2,6 @@
   "videos_dir": "docs/videos",
   "poll_interval_ms": 2000,
   "overlay_enabled": true,
-  "sidebar_enabled": true
+  "sidebar_enabled": true,
+  "overlay_size": 320
 }
