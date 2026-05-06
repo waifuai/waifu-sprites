@@ -1,9 +1,9 @@
 {
   "name": "waifu-sprites",
   "label": "Waifu Sprites",
-  "description": "Waifu sprite companion — 9 animation states mapped to agent activity",
+  "description": "Video-based AI companion — fluid, expressive video clips driven by agent activity",
   "icon": "Heart",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "tab": {
     "path": "/waifu-sprites",
     "position": "end",

@@ -1,13 +1,14 @@
 """
-waifu-sprites dashboard plugin — sprite backend.
+waifu-sprites dashboard plugin — video backend.
 
-Reads state from shared state file. Manages multiple installed pets.
-Each pet is a folder in pets/ with pet.json + spritesheet.webp.
+Reads state from shared state file. Serves video clips for each state.
+Each state maps to a video file in the videos/ directory.
 """
 
 import os
 import json
 import time
+import random
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -17,45 +18,16 @@ router = APIRouter()
 # ── Paths ────────────────────────────────────────────────────────
 
 PLUGIN_DIR = Path(__file__).parent.parent
-PETS_DIR = PLUGIN_DIR / "pets"
+VIDEOS_DIR = PLUGIN_DIR / "videos"
+DOCS_VIDEOS_DIR = PLUGIN_DIR / "docs" / "videos"
 STATE_FILE = PLUGIN_DIR / "state.json"
 
-# ── Sprite atlas (fixed for all pets) ────────────────────────────
+# ── State definitions ────────────────────────────────────────────
 
-ATLAS = {
-    "width": 1536,
-    "height": 1872,
-    "cell_width": 192,
-    "cell_height": 208,
-    "cols": 8,
-    "rows": 9,
-}
-
-ROWS = [
-    {"row": 0, "name": "idle",          "frames": 6, "duration": 200},
-    {"row": 1, "name": "running-right",  "frames": 8, "duration": 120},
-    {"row": 2, "name": "running-left",   "frames": 8, "duration": 120},
-    {"row": 3, "name": "waving",         "frames": 4, "duration": 250},
-    {"row": 4, "name": "jumping",        "frames": 5, "duration": 180},
-    {"row": 5, "name": "failed",         "frames": 8, "duration": 150},
-    {"row": 6, "name": "waiting",        "frames": 6, "duration": 300},
-    {"row": 7, "name": "running",        "frames": 6, "duration": 140},
-    {"row": 8, "name": "review",         "frames": 6, "duration": 250},
+STATES = [
+    "idle", "listening", "speaking", "thinking", "typing", "searching",
+    "calculating", "fixing", "success", "error", "alert", "sleeping",
 ]
-
-# ── State → row mapping ─────────────────────────────────────────
-
-STATE_TO_ROW = {
-    "idle": 0, "typing": 1, "listening": 2, "speaking": 3,
-    "searching": 1, "calculating": 7, "fixing": 7,
-    "success": 4, "error": 5, "alert": 6, "thinking": 6, "sleeping": 0,
-    "happy": 4, "amused": 4, "empathetic": 6, "curious": 8,
-    "confused": 5, "surprised": 4, "embarrassed": 3, "confident": 4,
-    "annoyed": 5, "overwhelmed": 6, "determined": 7, "affectionate": 8,
-    "e1": 4, "e2": 4, "e3": 6, "e4": 8,
-    "e5": 5, "e6": 4, "e7": 3, "e8": 4,
-    "e9": 5, "e10": 6, "e11": 7, "e12": 8,
-}
 
 EMOTION_NAMES = {
     "e1": "happy", "e2": "amused", "e3": "empathetic", "e4": "curious",
@@ -63,11 +35,39 @@ EMOTION_NAMES = {
     "e9": "annoyed", "e10": "overwhelmed", "e11": "determined", "e12": "affectionate",
 }
 
-STATES = [
-    "idle", "listening", "speaking", "thinking", "typing", "searching",
-    "calculating", "fixing", "success", "error", "alert", "sleeping",
-]
 EMOTIONS = list(EMOTION_NAMES.keys())
+
+# ── State → video mapping ────────────────────────────────────────
+# Maps state/emotion names to video file numbers.
+# Each number may have variations (e.g., 1.mp4 and 1-1.mp4).
+
+STATE_VIDEO_MAP = {
+    "idle": "1",
+    "listening": "2",
+    "speaking": "3",
+    "thinking": "4",
+    "typing": "5",
+    "searching": "6",
+    "calculating": "7",
+    "fixing": "8",
+    "success": "9",
+    "error": "10",
+    "alert": "11",
+    "sleeping": "12",
+    # Emotions
+    "e1": "e1",
+    "e2": "e2",
+    "e3": "e3",
+    "e4": "e4",
+    "e5": "e5",
+    "e6": "e6",
+    "e7": "e7",
+    "e8": "e8",
+    "e9": "e9",
+    "e10": "e10",
+    "e11": "e11",
+    "e12": "e12",
+}
 
 # ── Tool → state mapping ─────────────────────────────────────────
 
@@ -103,60 +103,49 @@ EMOTION_KEYWORDS = [
 ]
 
 
-# ── Pet management ───────────────────────────────────────────────
+# ── Video helpers ────────────────────────────────────────────────
 
-def _scan_pets() -> list:
-    """Scan pets/ directory and return list of pet metadata."""
-    pets = []
-    if not PETS_DIR.exists():
-        return pets
-    for entry in sorted(PETS_DIR.iterdir()):
-        if not entry.is_dir():
-            continue
-        manifest = entry / "pet.json"
-        sheet = entry / "spritesheet.webp"
-        if not manifest.exists() or not sheet.exists():
-            continue
-        try:
-            data = json.loads(manifest.read_text())
-            data["_dir"] = entry.name
-            data["_spritesheet"] = str(sheet)
-            data["_size"] = sheet.stat().st_size
-            pets.append(data)
-        except Exception:
-            continue
-    return pets
+def _get_videos_dir() -> Path:
+    """Return the videos directory (prefer docs/videos for GitHub Pages compat)."""
+    if DOCS_VIDEOS_DIR.exists() and any(DOCS_VIDEOS_DIR.glob("*.mp4")):
+        return DOCS_VIDEOS_DIR
+    return VIDEOS_DIR
 
 
-def _get_active_pet_id() -> str:
-    """Get the currently active pet ID from state."""
-    data = _read_state()
-    return data.get("active_pet", "")
+def _find_video(state_key: str) -> Path | None:
+    """Find a video file for the given state/emotion key.
 
+    Tries variations in order: base, -1, -2.
+    e.g., for key '1': tries 1.mp4, 1-1.mp4, 1-2.mp4
+    """
+    vid_dir = _get_videos_dir()
+    video_num = STATE_VIDEO_MAP.get(state_key)
+    if not video_num:
+        return None
 
-def _get_active_pet() -> dict | None:
-    """Get the active pet's metadata."""
-    pet_id = _get_active_pet_id()
-    if pet_id:
-        for pet in _scan_pets():
-            if pet.get("id") == pet_id or pet.get("_dir") == pet_id:
-                return pet
-    # Default to first available pet
-    pets = _scan_pets()
-    if pets:
-        _set_active_pet(pets[0].get("id", pets[0].get("_dir", "")))
-        return pets[0]
+    # Try base file first, then variations
+    candidates = [f"{video_num}.mp4"]
+    for i in range(1, 4):
+        candidates.append(f"{video_num}-{i}.mp4")
+
+    for name in candidates:
+        path = vid_dir / name
+        if path.exists():
+            return path
     return None
 
 
-def _set_active_pet(pet_id: str):
-    """Set the active pet."""
-    data = _read_state()
-    data["active_pet"] = pet_id
-    try:
-        STATE_FILE.write_text(json.dumps(data))
-    except Exception:
-        pass
+def _pick_random_video(state_key: str) -> Path | None:
+    """Pick a random variation for the given state (for variety)."""
+    vid_dir = _get_videos_dir()
+    video_num = STATE_VIDEO_MAP.get(state_key)
+    if not video_num:
+        return None
+
+    matches = list(vid_dir.glob(f"{video_num}*.mp4"))
+    if not matches:
+        return None
+    return random.choice(matches)
 
 
 # ── State helpers ────────────────────────────────────────────────
@@ -168,7 +157,7 @@ def _read_state() -> dict:
             return data if isinstance(data, dict) else {}
     except Exception:
         pass
-    return {"state": "idle", "emotion": None, "updated_at": 0, "active_pet": ""}
+    return {"state": "idle", "emotion": None, "updated_at": 0}
 
 
 def _write_state(state=None, emotion=None):
@@ -215,103 +204,52 @@ def _get_tool_state(fn: str) -> str:
     return "typing"
 
 
-def _get_row_info(state: str, emotion: str = None) -> dict:
-    display = emotion or state
-    row_idx = STATE_TO_ROW.get(display, 0)
-    return ROWS[row_idx]
-
-
 # ── Routes ───────────────────────────────────────────────────────
-
-@router.get("/pets")
-async def list_pets():
-    """List all installed pets."""
-    pets = _scan_pets()
-    active_id = _get_active_pet_id()
-    result = []
-    for pet in pets:
-        pid = pet.get("id", pet.get("_dir", ""))
-        result.append({
-            "id": pid,
-            "displayName": pet.get("displayName", pid),
-            "description": pet.get("description", ""),
-            "active": pid == active_id,
-        })
-    return {"pets": result, "active": active_id}
-
-
-@router.post("/pets/active")
-async def set_active(body: dict):
-    """Switch the active pet."""
-    pet_id = body.get("id", "")
-    if not pet_id:
-        raise HTTPException(400, "Missing pet id")
-    # Verify pet exists
-    for pet in _scan_pets():
-        if pet.get("id") == pet_id or pet.get("_dir") == pet_id:
-            _set_active_pet(pet_id)
-            return {"ok": True, "active": pet_id}
-    raise HTTPException(404, f"Pet not found: {pet_id}")
-
 
 @router.get("/status")
 async def get_status():
-    """Current state with active pet info."""
+    """Current state with video info."""
     data = _read_state()
     state = data.get("state", "idle")
     emotion = data.get("emotion")
     display = emotion or state
-    row_info = _get_row_info(state, emotion)
-    pet = _get_active_pet()
+    label = EMOTION_NAMES.get(display, display) if emotion else display
+
+    # Find the video for this state
+    video_key = emotion or state
+    video_path = _find_video(video_key)
 
     return {
         "state": state,
         "emotion": emotion,
         "emotion_name": EMOTION_NAMES.get(emotion) if emotion else None,
         "display": display,
-        "display_label": EMOTION_NAMES.get(display, display),
-        "row": row_info["row"],
-        "row_name": row_info["name"],
-        "frames": row_info["frames"],
-        "frame_duration": row_info["duration"],
-        "pet": {
-            "id": pet.get("id", "") if pet else "",
-            "displayName": pet.get("displayName", "No pet") if pet else "No pet",
-            "description": pet.get("description", "") if pet else "",
-        } if pet else None,
+        "display_label": label,
+        "video": f"/api/plugins/waifu-sprites/video/{video_key}" if video_path else None,
     }
 
 
-@router.get("/atlas")
-async def get_atlas():
-    """Atlas definition + active pet spritesheet URL."""
-    pet = _get_active_pet()
-    return {
-        "atlas": ATLAS,
-        "states": ROWS,
-        "spritesheet": f"/api/plugins/waifu-sprites/spritesheet?v={pet.get('id', '')}" if pet else None,
-        "pet": {
-            "id": pet.get("id", ""),
-            "displayName": pet.get("displayName", ""),
-            "description": pet.get("description", ""),
-        } if pet else None,
-    }
-
-
-@router.get("/spritesheet")
-async def serve_spritesheet():
-    """Serve the active pet's spritesheet."""
-    pet = _get_active_pet()
-    if not pet:
-        raise HTTPException(404, "No pet installed")
-    sheet_path = Path(pet["_spritesheet"])
-    if not sheet_path.exists():
-        raise HTTPException(404, "Spritesheet not found")
+@router.get("/video/{state_key}")
+async def serve_video(state_key: str):
+    """Serve a video file for the given state/emotion."""
+    video_path = _find_video(state_key)
+    if not video_path:
+        raise HTTPException(404, f"No video for state: {state_key}")
     return FileResponse(
-        str(sheet_path),
-        media_type="image/webp",
+        str(video_path),
+        media_type="video/mp4",
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+
+@router.get("/videos")
+async def list_videos():
+    """List all available video files."""
+    vid_dir = _get_videos_dir()
+    if not vid_dir.exists():
+        return {"videos": []}
+    videos = sorted([f.name for f in vid_dir.glob("*.mp4")])
+    return {"videos": videos, "dir": str(vid_dir)}
 
 
 @router.post("/state")
@@ -359,9 +297,8 @@ async def detect_emotion(body: dict):
 
 @router.get("/states")
 async def list_states():
-    """List all available states and their atlas mapping."""
+    """List all available states and their video mapping."""
     return {
-        "actions": {s: STATE_TO_ROW.get(s, 0) for s in STATES},
-        "emotions": {e: {"name": EMOTION_NAMES[e], "row": STATE_TO_ROW.get(e, 0)} for e in EMOTIONS},
-        "atlas": ROWS,
+        "actions": {s: STATE_VIDEO_MAP.get(s) for s in STATES},
+        "emotions": {e: {"name": EMOTION_NAMES[e], "video": STATE_VIDEO_MAP.get(e)} for e in EMOTIONS},
     }

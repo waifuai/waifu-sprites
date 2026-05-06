@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waifu Sprites — Video AI Companion for Hermes Agent</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a14;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Hero ──────────────────────────────────────────────────── */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 60px 20px 40px;
+    position: relative;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at 50% 30%, rgba(136, 192, 208, 0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero-title {
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #88c0d0, #a3be8c);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-subtitle {
+    font-size: clamp(14px, 2vw, 18px);
+    color: #888;
+    margin-bottom: 40px;
+    text-align: center;
+    max-width: 500px;
+    line-height: 1.5;
+  }
+
+  .hero-subtitle strong { color: #a3be8c; }
+
+  /* ── Video player ─────────────────────────────────────────── */
+  .video-stage {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    margin-bottom: 24px;
+  }
+
+  .video-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    max-height: 80vh;
+    background: #111;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow:
+      0 8px 40px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  .video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .video-overlay {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 24px 16px 16px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .state-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: capitalize;
+    letter-spacing: 0.04em;
+    background: rgba(26, 26, 46, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(8px);
+    transition: all 0.3s;
+  }
+
+  .event-feed {
+    font-size: 11px;
+    color: #555;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    text-align: center;
+    min-height: 16px;
+    transition: opacity 0.3s;
+  }
+
+  /* ── Auto-cycle controls ──────────────────────────────────── */
+  .cycle-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .cycle-btn {
+    padding: 6px 16px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: rgba(26, 26, 46, 0.6);
+    color: #888;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+
+  .cycle-btn:hover { border-color: #88c0d0; color: #88c0d0; }
+  .cycle-btn.active { border-color: #a3be8c; color: #a3be8c; background: rgba(163, 190, 140, 0.1); }
+
+  .cycle-status {
+    font-size: 11px;
+    color: #555;
+  }
+
+  /* ── All states grid ──────────────────────────────────────── */
+  .states-section {
+    max-width: 800px;
+    width: 100%;
+    padding: 0 20px 60px;
+  }
+
+  .states-section h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #888;
+    margin-bottom: 16px;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .states-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+  }
+
+  .state-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px 8px;
+    background: rgba(26, 26, 46, 0.5);
+    border: 1px solid #222;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+
+  .state-card:hover {
+    border-color: #88c0d0;
+    background: rgba(136, 192, 208, 0.06);
+    transform: translateY(-2px);
+  }
+
+  .state-card.playing {
+    border-color: #a3be8c;
+    background: rgba(163, 190, 140, 0.1);
+  }
+
+  .state-card-icon {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .state-card-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #ccc;
+    text-transform: capitalize;
+  }
+
+  .state-card-type {
+    font-size: 10px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Info section ─────────────────────────────────────────── */
+  .info {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 0 20px 80px;
+    text-align: center;
+  }
+
+  .info h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #ccc;
+  }
+
+  .info p {
+    font-size: 14px;
+    line-height: 1.7;
+    color: #888;
+    margin-bottom: 16px;
+  }
+
+  .info code {
+    font-size: 12px;
+    padding: 2px 6px;
+    background: rgba(136, 192, 208, 0.1);
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #88c0d0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin: 32px 0;
+    text-align: left;
+  }
+
+  .feature {
+    padding: 16px;
+    background: rgba(26, 26, 46, 0.5);
+    border: 1px solid #222;
+    border-radius: 12px;
+  }
+
+  .feature h3 { font-size: 13px; font-weight: 600; color: #a3be8c; margin-bottom: 6px; }
+  .feature p { font-size: 12px; color: #666; line-height: 1.5; margin: 0; }
+
+  .cta {
+    display: inline-block;
+    margin-top: 24px;
+    padding: 12px 28px;
+    background: linear-gradient(135deg, #88c0d0, #a3be8c);
+    color: #0a0a14;
+    font-weight: 700;
+    font-size: 14px;
+    border-radius: 10px;
+    text-decoration: none;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(136, 192, 208, 0.3);
+  }
+
+  @media (max-width: 480px) {
+    .video-container { aspect-ratio: 9 / 16; }
+    .states-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1 class="hero-title">Waifu Sprites</h1>
+  <p class="hero-subtitle">
+    The first <strong>video-based</strong> AI companion for Hermes Agent.<br>
+    Not a spritesheet. Not a static loop. Fluid, emotional, alive.
+  </p>
+
+  <div class="video-stage">
+    <div class="video-container" id="videoContainer">
+      <video id="mainVideo" autoplay loop muted playsinline></video>
+      <div class="video-overlay">
+        <div class="state-badge">
+          <span class="icon" id="stateIcon">&#9654;</span>
+          <span id="stateLabel">idle</span>
+        </div>
+        <div class="event-feed" id="eventFeed"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cycle-controls">
+    <button class="cycle-btn" id="cycleBtn">Auto-cycle: OFF</button>
+    <span class="cycle-status" id="cycleStatus">Click any state above</span>
+  </div>
+</div>
+
+<div class="states-section">
+    <h2>All 50 Videos</h2>
+  <div class="states-grid" id="statesGrid"></div>
+</div>
+
+<div class="info">
+  <h2>Why video?</h2>
+  <p>
+    Codex pets give you 8-frame sprite loops. Waifu Sprites gives you
+    fluid, expressive video with real emotional range. The difference
+    is immediately visible.
+  </p>
+
+  <div class="features">
+    <div class="feature">
+      <h3>50 Videos</h3>
+      <p>12 action states + 12 emotions, each with multiple variations. Every mood, every moment.</p>
+    </div>
+    <div class="feature">
+      <h3>12 Emotions</h3>
+      <p>happy, confused, affectionate, determined, annoyed, empathetic... Detected from response text.</p>
+    </div>
+    <div class="feature">
+      <h3>Agent Hooks</h3>
+      <p>Maps tool calls to states automatically. web_search &rarr; searching. terminal &rarr; fixing.</p>
+    </div>
+    <div class="feature">
+      <h3>Hermes Plugin</h3>
+      <p>Native dashboard plugin. Overlay, sidebar, and full-page modes.</p>
+    </div>
+  </div>
+
+  <p>
+    Clone the repo and load it as a Hermes plugin.
+  </p>
+
+  <a class="cta" href="https://github.com/waifuai/waifu-sprites">View on GitHub</a>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ── All 50 videos ──────────────────────────────────────────────
+  var STATE_LABELS = {
+    "1": { label: "idle",         icon: "\u25b6",  type: "action" },
+    "2": { label: "listening",    icon: "\u266b",  type: "action" },
+    "3": { label: "speaking",     icon: "\u266b",  type: "action" },
+    "4": { label: "thinking",     icon: "\u2026",  type: "action" },
+    "5": { label: "typing",       icon: "\u2328",  type: "action" },
+    "6": { label: "searching",    icon: "\u26b2",  type: "action" },
+    "7": { label: "calculating",  icon: "\u00f7",  type: "action" },
+    "8": { label: "fixing",       icon: "\u2692",  type: "action" },
+    "9": { label: "success",      icon: "\u2713",  type: "action" },
+    "10": { label: "error",       icon: "\u2717",  type: "action" },
+    "11": { label: "alert",       icon: "\u26a0",  type: "action" },
+    "12": { label: "sleeping",    icon: "\u263d",  type: "action" },
+    "e1": { label: "happy",       icon: "\u263a",  type: "emotion" },
+    "e2": { label: "amused",      icon: "\u263a",  type: "emotion" },
+    "e3": { label: "empathetic",  icon: "\u2665",  type: "emotion" },
+    "e4": { label: "curious",     icon: "?",       type: "emotion" },
+    "e5": { label: "confused",    icon: "?",       type: "emotion" },
+    "e6": { label: "surprised",   icon: "!",       type: "emotion" },
+    "e7": { label: "embarrassed", icon: "~",       type: "emotion" },
+    "e8": { label: "confident",   icon: "\u2713",  type: "emotion" },
+    "e9": { label: "annoyed",     icon: "\u2260",  type: "emotion" },
+    "e10": { label: "overwhelmed",icon: "\u26a0",  type: "emotion" },
+    "e11": { label: "determined", icon: "\u2191",  type: "emotion" },
+    "e12": { label: "affectionate",icon: "\u2665", type: "emotion" },
+  };
+
+  var ALL_VIDEOS = [
+    "1","1-1","2","2-1","3","3-1","4","4-1","4-2","5","5-1",
+    "6","6-1","7","7-1","8","8-1","9","9-1","10","10-1",
+    "11","11-1","12","12-1",
+    "e1","e1-1","e2","e2-1","e2-2","e3","e3-1","e4","e4-1",
+    "e5","e5-1","e6","e6-1","e7","e7-1","e8","e8-1","e9","e9-1",
+    "e10","e10-1","e11","e11-1","e12","e12-1"
+  ];
+
+  // Build ALL_STATES from the 50 videos
+  var ALL_STATES = ALL_VIDEOS.map(function (num) {
+    var base = num.replace(/-\d+$/, "");
+    var info = STATE_LABELS[base] || { label: base, icon: "?", type: "unknown" };
+    var variation = num.match(/-(\d+)$/);
+    var label = info.label + (variation ? " v" + variation[1] : "");
+    return { num: num, label: label, icon: info.icon, type: info.type };
+  });
+
+  var videoEl = document.getElementById("mainVideo");
+  var stateLabel = document.getElementById("stateLabel");
+  var stateIcon = document.getElementById("stateIcon");
+  var eventFeed = document.getElementById("eventFeed");
+  var statesGrid = document.getElementById("statesGrid");
+  var cycleBtn = document.getElementById("cycleBtn");
+  var cycleStatus = document.getElementById("cycleStatus");
+
+  var currentIndex = 0;
+  var autoTimer = null;
+  var isAutoPlaying = false;
+
+  // ── Build grid ───────────────────────────────────────────────
+  ALL_STATES.forEach(function (s, i) {
+    var card = document.createElement("div");
+    card.className = "state-card";
+    card.setAttribute("data-index", i);
+    card.innerHTML =
+      '<div class="state-card-icon">' + s.icon + '</div>' +
+      '<div class="state-card-name">' + s.label + '</div>' +
+      '<div class="state-card-type">' + s.type + '</div>';
+    card.addEventListener("click", function () {
+      stopAutoPlay();
+      playState(i);
+      // Highlight clicked card
+      document.querySelectorAll(".state-card").forEach(function (c) { c.classList.remove("playing"); });
+      card.classList.add("playing");
+    });
+    statesGrid.appendChild(card);
+  });
+
+  // ── Play a state ─────────────────────────────────────────────
+  function playState(index) {
+    var state = ALL_STATES[index];
+    currentIndex = index;
+
+    var src = "videos/" + state.num + ".mp4";
+    videoEl.pause();
+    videoEl.src = src;
+    videoEl.load();
+    videoEl.play().catch(function () {});
+
+    stateLabel.textContent = state.label;
+    stateIcon.innerHTML = state.icon;
+
+    // Update grid highlight
+    document.querySelectorAll(".state-card").forEach(function (c, i) {
+      c.classList.toggle("playing", i === index);
+    });
+
+    // Event feed — use base state name
+    var baseNum = state.num.replace(/-\d+$/, "");
+    var feedTexts = {
+      "1": "session active | waiting for input",
+      "2": "[hook] on_session_start",
+      "3": "[llm] generating response...",
+      "4": "[llm] processing...",
+      "5": "[tool] write_file",
+      "6": "[tool] web_search",
+      "7": "[tool] execute_code",
+      "8": "[tool] terminal",
+      "9": "[tool] complete \u2192 idle",
+      "10": "[tool] error detected",
+      "11": "[hook] clarify requested",
+      "12": "[hook] on_session_end",
+      "e1": "[emotion] happy",
+      "e2": "[emotion] amused",
+      "e3": "[emotion] empathetic",
+      "e4": "[emotion] curious",
+      "e5": "[emotion] confused",
+      "e6": "[emotion] surprised",
+      "e7": "[emotion] embarrassed",
+      "e8": "[emotion] confident",
+      "e9": "[emotion] annoyed",
+      "e10": "[emotion] overwhelmed",
+      "e11": "[emotion] determined",
+      "e12": "[emotion] affectionate",
+    };
+    eventFeed.textContent = feedTexts[baseNum] || "";
+    eventFeed.style.opacity = "1";
+    setTimeout(function () { eventFeed.style.opacity = "0.3"; }, 2500);
+  }
+
+  // ── Auto-cycle ───────────────────────────────────────────────
+  // All 50 videos, starting from e12 (affectionate) then wrapping
+  var SHOWCASE_ORDER = [];
+  for (var si = 48; si < ALL_STATES.length; si++) SHOWCASE_ORDER.push(si);
+  for (var si2 = 0; si2 < 48; si2++) SHOWCASE_ORDER.push(si2);
+
+  function startAutoPlay() {
+    isAutoPlaying = true;
+    cycleBtn.textContent = "Auto-cycle: ON";
+    cycleBtn.classList.add("active");
+    cycleStatus.textContent = "Playing all " + SHOWCASE_ORDER.length + " videos";
+    var seqIndex = 0;
+    playState(SHOWCASE_ORDER[0]);
+    autoTimer = setInterval(function () {
+      seqIndex = (seqIndex + 1) % SHOWCASE_ORDER.length;
+      playState(SHOWCASE_ORDER[seqIndex]);
+    }, 4000);
+  }
+
+  function stopAutoPlay() {
+    isAutoPlaying = false;
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    cycleBtn.textContent = "Auto-cycle: OFF";
+    cycleBtn.classList.remove("active");
+    cycleStatus.textContent = "Click any state above";
+  }
+
+  cycleBtn.addEventListener("click", function () {
+    if (isAutoPlaying) stopAutoPlay();
+    else startAutoPlay();
+  });
+
+  // ── Init ─────────────────────────────────────────────────────
+  // Start with affectionate (e12, index 48), auto-cycle OFF
+  playState(48);
+
+  // Resume auto-play after 15s of inactivity
+  var resumeTimer = null;
+  statesGrid.addEventListener("click", function () {
+    if (resumeTimer) clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(startAutoPlay, 15000);
+  });
+
+})();
+</script>
+
+</body>
+</html>

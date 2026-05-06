@@ -1,6 +1,6 @@
 name: waifu-sprites
-version: 1.0.0
-description: "Animated sprite companion — auto-maps agent activity to sprite states"
+version: 3.0.0
+description: "Video-based AI companion — fluid, expressive video clips driven by agent activity"
 author: "WaifuAI"
 hooks:
   - pre_tool_call
