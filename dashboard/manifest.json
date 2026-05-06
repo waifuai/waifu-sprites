@@ -3,11 +3,11 @@
   "label": "Waifu Sprites",
   "description": "Video-based AI companion — fluid, expressive video clips driven by agent activity",
   "icon": "Heart",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "tab": {
     "path": "/waifu-sprites",
     "position": "end",
-    "hidden": true
+    "hidden": false
   },
   "slots": ["overlay", "sidebar"],
   "entry": "dist/index.js",
