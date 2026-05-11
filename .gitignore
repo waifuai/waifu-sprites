@@ -6,3 +6,11 @@ display_stats.json
 state.json
 assets/*.webp
 pets
+
+# Binary files (bloat history)
+*.mp4
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
