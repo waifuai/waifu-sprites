@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     "overlay_enabled": True,
     "overlay_size": 320,
     "poll_interval_ms": 2000,
+    "video_source": "auto",  # auto | cdn | local
 }
 
 
@@ -60,9 +61,9 @@ STATES = [
 ]
 
 EMOTION_NAMES = {
-    "e1": "happy", "e2": "amused", "e3": "empathetic", "e4": "curious",
-    "e5": "confused", "e6": "surprised", "e7": "embarrassed", "e8": "confident",
-    "e9": "annoyed", "e10": "overwhelmed", "e11": "determined", "e12": "affectionate",
+    "e1": "happy", "e2": "funny", "e3": "empathetic", "e4": "curious",
+    "e5": "confused", "e6": "amazed", "e7": "sorry", "e8": "found_it",
+    "e9": "annoyed", "e10": "overwhelmed", "e11": "planning", "e12": "love",
 }
 
 EMOTIONS = list(EMOTION_NAMES.keys())

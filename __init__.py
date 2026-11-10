@@ -17,7 +17,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-STATE_FILE = Path.home() / ".hermes" / "plugins" / "waifu-sprites" / "state.json"
+# Lives beside the plugin code (gitignored); derived from __file__ so the
+# plugin works from any install location, not just the default plugins path.
+STATE_FILE = Path(__file__).resolve().parent / "state.json"
 
 # ── State definitions ────────────────────────────────────────────
 

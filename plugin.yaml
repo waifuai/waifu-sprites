@@ -1,7 +1,16 @@
 name: waifu-sprites
-version: 3.1.0
-description: "Video-based AI companion with dashboard — settings, live state, video browser"
+version: 3.2.0
+description: "Video-based AI companion with dashboard — live agent states, emotions, overlay and manual controls"
 author: "WaifuAI"
+requires_hermes: ">=0.13"
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_llm_call
+  - post_llm_call
+  - on_session_start
+  - on_session_end
+# Legacy key: Hermes 0.13-era loaders read this one; newer releases ignore it.
 hooks:
   - pre_tool_call
   - post_tool_call
@@ -9,3 +18,20 @@ hooks:
   - post_llm_call
   - on_session_start
   - on_session_end
+config_schema:
+  overlay_enabled:
+    type: boolean
+    default: true
+    title: Show floating overlay
+  overlay_size:
+    type: integer
+    default: 320
+    title: Overlay size (px)
+  poll_interval_ms:
+    type: integer
+    default: 2000
+    title: State refresh interval (ms)
+  video_source:
+    type: string
+    default: auto
+    title: Clip source (auto, cdn, local)

@@ -1,0 +1,196 @@
+/* waifu-sprites dashboard styles. All classes are waifu-sprites-prefixed;
+   the plugin never styles or selects app markup. */
+
+.waifu-sprites-tab {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 20px 40px;
+  font-family: inherit;
+  color: inherit;
+}
+
+.waifu-sprites-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.waifu-sprites-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.waifu-sprites-pill {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  background: rgba(127, 127, 127, 0.12);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.waifu-sprites-error {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 80, 80, 0.4);
+  background: rgba(220, 80, 80, 0.1);
+  font-size: 0.85rem;
+}
+
+.waifu-sprites-panel {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+/* In-tab stage. When the overlay hosts the videos, show a quiet placeholder. */
+.waifu-sprites-stage {
+  position: relative;
+  width: 320px;
+  max-width: 100%;
+  min-height: 120px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.waifu-sprites-stage-overlay {
+  border: 1px dashed rgba(127, 127, 127, 0.4);
+}
+
+.waifu-sprites-stage-overlay::after {
+  content: 'Playing in the floating overlay';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  color: rgba(127, 127, 127, 0.8);
+}
+
+.waifu-sprites-stage video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.waifu-sprites-note {
+  text-align: center;
+  font-size: 0.8rem;
+  color: rgba(127, 127, 127, 0.85);
+  margin-bottom: 14px;
+}
+
+.waifu-sprites-section {
+  margin-top: 18px;
+}
+
+.waifu-sprites-section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(127, 127, 127, 0.9);
+  margin-bottom: 8px;
+}
+
+.waifu-sprites-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.waifu-sprites-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  background: transparent;
+  color: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.waifu-sprites-chip:hover {
+  background: rgba(127, 127, 127, 0.15);
+}
+
+.waifu-sprites-chip.waifu-sprites-active {
+  border-color: currentColor;
+  background: rgba(127, 127, 127, 0.2);
+  font-weight: 600;
+}
+
+.waifu-sprites-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.waifu-sprites-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.waifu-sprites-value {
+  color: rgba(127, 127, 127, 0.9);
+  min-width: 3.5em;
+}
+
+.waifu-sprites-setting select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+/* ── Floating overlay ── */
+
+.waifu-sprites-overlay {
+  position: fixed;
+  top: 72px;
+  right: 24px;
+  z-index: 9999;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  touch-action: none;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.waifu-sprites-overlay:active {
+  cursor: grabbing;
+}
+
+.waifu-sprites-overlay-stage video {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+/* The two stacked videos: only the front one is visible; swaps crossfade. */
+.waifu-sprites-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+}
+
+.waifu-sprites-video.waifu-sprites-front {
+  position: relative;
+  opacity: 1;
+  transition: opacity 0.25s ease-in;
+}
