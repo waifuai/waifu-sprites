@@ -14,3 +14,6 @@ pets
 *.jpeg
 *.gif
 *.webp
+
+# Catalog entry screenshots (small, deliberate)
+!docs/screenshots/*.png
